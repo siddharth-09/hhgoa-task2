@@ -1,0 +1,90 @@
+# Target: Oracle Ampere A1 (aarch64, 4 cores, 23GB RAM).
+#
+# IMPORTANT -- this is a SHARED box running ~24 other containers (Jellyfin,
+# open-webui, three Postgres instances, backup jobs) with six weeks of uptime,
+# and the root filesystem sits at 89% full (~23GB free).
+#
+# Therefore:
+#   * hard cpu/memory caps on every service, so nothing here starves the box.
+#     Uses `cpus`/`mem_limit`, which Compose honours outside swarm mode --
+#     `deploy.resources.limits` is swarm-only and Compose errors if the two disagree.
+#   * the pipeline streams parquet over HTTP range reads instead of storing
+#     7.4GB of shards
+#   * never run `docker system prune` here: 55GB of images look reclaimable but
+#     belong to other people's running services
+
+x-limits: &limits
+  cpus: "3.0"        # leave one core for the box's existing services
+  mem_limit: 8g
+  mem_reservation: 2g
+
+services:
+  # One-shot pipeline: stream -> chunk -> embed -> index.
+  # Run with: docker compose run --rm ingest
+  ingest:
+    build: .
+    image: hhgoa-task2:latest
+    <<: *limits
+    command: ["python", "-m", "ingest.pipeline", "--langs", "hin", "mar", "--max-queries", "25000", "--stream"]
+    volumes:
+      - task2-data:/data
+      # Bedrock uses the AWS credential chain; read-only so the container
+      # can never modify the host's credentials.
+      - ${HOME}/.aws:/root/.aws:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - E5_VARIANT=int8_arm
+      - OMP_NUM_THREADS=3
+      - ORT_THREADS=3
+    restart: "no"
+
+  # Fast end-to-end validation before committing to the multi-hour run.
+  # Run with: docker compose run --rm pilot
+  pilot:
+    build: .
+    image: hhgoa-task2:latest
+    <<: *limits
+    command: ["python", "-m", "ingest.pipeline", "--langs", "hin", "--max-queries", "2000", "--tag", "pilot", "--stream"]
+    volumes:
+      - task2-data:/data
+      # Bedrock uses the AWS credential chain; read-only so the container
+      # can never modify the host's credentials.
+      - ${HOME}/.aws:/root/.aws:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - E5_VARIANT=int8_arm
+      - OMP_NUM_THREADS=3
+      - ORT_THREADS=3
+    restart: "no"
+
+  api:
+    build: .
+    image: hhgoa-task2:latest
+    <<: *limits
+    ports:
+      - "127.0.0.1:8000:8000"   # loopback only; front with nginx/TLS before exposing
+    volumes:
+      - task2-data:/data
+      # Bedrock uses the AWS credential chain; read-only so the container
+      # can never modify the host's credentials.
+      - ${HOME}/.aws:/root/.aws:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - INDEX_PATH=/data/index
+      - E5_VARIANT=int8_arm
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s        # index load + ONNX warmup
+    restart: unless-stopped
+
+volumes:
+  task2-data:

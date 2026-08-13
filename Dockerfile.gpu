@@ -1,0 +1,62 @@
+# CUDA build for the ingest stage only. The serving container stays CPU-only --
+# retrieval is ~3ms on a CPU and needs no GPU, so paying for one at serve time
+# would be waste.
+#
+# Embedding is ~90% of ingest runtime, and it is the one part that maps cleanly
+# onto a GPU: 10-30x is typical for a 118M-parameter encoder, which turns a
+# 3-hour run into roughly 20-40 minutes.
+#
+# Version pinning matters here. onnxruntime-gpu links against specific CUDA and
+# cuDNN majors; a mismatch does not error, it silently drops CUDAExecutionProvider
+# and falls back to CPU -- so you get a "working" run at 1/20th the speed. The
+# provider assertion in the smoke test below is there to catch exactly that.
+#
+#   onnxruntime-gpu 1.20+  ->  CUDA 12.x + cuDNN 9
+#
+# Build:  docker build -f Dockerfile.gpu -t hhgoa-task2:gpu .
+# Run:    docker run --gpus all -v task2-data:/data hhgoa-task2:gpu <cmd>
+
+FROM nvidia/cuda:12.6.2-cudnn-runtime-ubuntu22.04
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    HF_HOME=/data/hf_cache \
+    E5_VARIANT=fp32 \
+    EMBED_BATCH=256
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 python3.11-venv python3-pip build-essential curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python
+
+WORKDIR /app
+
+# onnxruntime-gpu replaces onnxruntime -- installing both makes provider
+# resolution order-dependent and unpredictable.
+COPY pyproject.toml ./
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --upgrade pip \
+    && /opt/venv/bin/pip install \
+        onnxruntime-gpu \
+        "pyarrow>=18.0" "huggingface-hub>=0.26" "tokenizers>=0.20" \
+        "hnswlib>=0.8" "bm25s>=0.2" "PyStemmer>=2.2" "numpy>=2.0" \
+        "httpx>=0.27" "orjson>=3.10"
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    DATA_ROOT=/data
+
+COPY ingest/ ingest/
+COPY core/ core/
+COPY eval/ eval/
+COPY bench/ bench/
+
+VOLUME ["/data"]
+
+# Fail loudly if CUDA did not actually load, rather than quietly running on CPU.
+CMD ["python", "-c", "import onnxruntime as ort; \
+p = ort.get_available_providers(); print('providers:', p); \
+assert 'CUDAExecutionProvider' in p, 'CUDA provider missing -- check --gpus all and driver/CUDA versions'; \
+from core.embedder import Embedder; e = Embedder(); \
+print(f'variant={e.variant} provider={e.provider} batch={e.cfg.batch_size}')"]

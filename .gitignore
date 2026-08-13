@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/raw/
+data/index/
+*.parquet
+*.onnx
+.DS_Store
+.ruff_cache/
+.pytest_cache/
+bench/results/
