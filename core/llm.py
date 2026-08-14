@@ -491,10 +491,21 @@ class LLMChain:
                 continue
             tried_any = True
 
-            # Only the primary gets retries: a fallback is reached precisely
-            # because retrying is not working, and each retry is latency a user
-            # is sitting through.
-            r = c.generate(question, contexts, **(({"retries": 0} | kw) if i else kw))
+            # Retries only make sense when there is nothing else to try.
+            #
+            # The primary used to retry rate limits with a 3s x attempt backoff,
+            # which is correct for a per-minute quota when it is the only
+            # provider. With a live chain it is backwards: measured, a throttled
+            # Gemini spent ~10s backing off before falling through, while the
+            # next provider answers in ~2s. The user waits five times longer for
+            # a worse outcome.
+            #
+            # So retries are reserved for the sole-provider case; whenever an
+            # alternative exists, switching beats waiting. The cooldown above
+            # then keeps the throttled provider out of the path for 60s rather
+            # than paying that cost again on the next query.
+            solo = len(self.clients) == 1
+            r = c.generate(question, contexts, **(kw if (solo and i == 0) else ({"retries": 0} | kw)))
             if r.ok:
                 self._served[key] = self._served.get(key, 0) + 1
                 self._cooldown_until.pop(i, None)

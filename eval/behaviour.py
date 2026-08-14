@@ -69,14 +69,34 @@ CASES: list[tuple[str, str, str]] = [
 BUDGET_MS = 200
 
 
-def call(base: str, question: str, timeout: float = 120.0) -> dict:
+def call(base: str, question: str, timeout: float = 120.0, retries: int = 2) -> dict:
+    """POST /ask, retrying transient connection failures.
+
+    Without this the suite is flaky against a real deployment: a single dropped
+    TCP connection (observed twice against pucho.me, not reproducible in
+    isolation and with no server restart or crash behind it) reports as a
+    behavioural failure and casts doubt on results that are actually fine.
+
+    Only connection-level faults are retried. An HTTP error is a real answer
+    from the server and must not be papered over.
+    """
     req = urllib.request.Request(
         f"{base}/ask",
         data=json.dumps({"question": question, "generate": True}).encode(),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            last = e
+            if attempt < retries:
+                time.sleep(1.5 * (attempt + 1))
+    raise last  # type: ignore[misc]
 
 
 def classify(d: dict) -> str:
