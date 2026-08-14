@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 import urllib.request
 from pathlib import Path
 
@@ -66,12 +67,26 @@ class HttpRangeFile:
     """
 
     def __init__(self, url: str, readahead: int = 8 << 20):
+        # httpx, not urllib: urlopen opens a fresh TLS connection per request, and
+        # a streamed parquet issues dozens of range reads. The handshakes, not the
+        # bytes, dominated -- 300 queries took >6 minutes while transferring only
+        # tens of MB. A pooled client keeps one connection alive across all reads.
+        import httpx
+
         self.readahead = readahead
         self.pos = 0
         self.bytes_fetched = 0
-        with urllib.request.urlopen(urllib.request.Request(url, method="HEAD")) as r:
-            self.size = int(r.headers["Content-Length"])
-            self.url = r.url  # follow the CDN redirect once, then reuse
+        self.orig_url = url
+        self._client = httpx.Client(
+            follow_redirects=True,
+            timeout=httpx.Timeout(self.TIMEOUT_S, connect=15.0),
+            limits=httpx.Limits(max_keepalive_connections=4, keepalive_expiry=300.0),
+            headers={"Accept-Encoding": "identity"},  # ranges must not be re-encoded
+        )
+        r = self._client.head(url)
+        r.raise_for_status()
+        self.size = int(r.headers["Content-Length"])
+        self.url = str(r.url)  # resolved CDN target, reused for every range
         self._buf = b""
         self._buf_start = 0
 
@@ -90,7 +105,9 @@ class HttpRangeFile:
         return False
 
     def close(self) -> None:
-        pass
+        client = getattr(self, "_client", None)
+        if client is not None:
+            client.close()
 
     def tell(self) -> int:
         return self.pos
@@ -105,15 +122,67 @@ class HttpRangeFile:
         )
         return self.pos
 
-    def _fetch(self, start: int, length: int) -> bytes:
+    # A single range request is capped regardless of how much pyarrow asks for.
+    # An unbounded request became a 34MB transfer that a home connection dropped
+    # mid-flight (IncompleteRead), killing a multi-hour ingest at the first stage.
+    # Smaller requests fail less often and cost far less to retry.
+    MAX_CHUNK = 8 << 20
+    MAX_RETRIES = 5
+    TIMEOUT_S = 60
+
+    def _fetch_once(self, start: int, length: int) -> bytes:
         end = min(start + length, self.size) - 1
         if end < start:
             return b""
-        req = urllib.request.Request(self.url, headers={"Range": f"bytes={start}-{end}"})
-        with urllib.request.urlopen(req) as resp:
-            data = resp.read()
-        self.bytes_fetched += len(data)
+        r = self._client.get(self.url, headers={"Range": f"bytes={start}-{end}"})
+        r.raise_for_status()
+        data = r.content
+        want = end - start + 1
+        if len(data) != want:
+            raise OSError(f"short read: got {len(data)} of {want}")
         return data
+
+    def _fetch(self, start: int, length: int) -> bytes:
+        """Range-read with chunking and retry.
+
+        Streaming a 3.7GB parquet over a home connection for hours means transient
+        failures are certain, not hypothetical. Each chunk is retried with
+        exponential backoff; only a persistent failure propagates.
+        """
+        out = bytearray()
+        pos = start
+        remaining = min(length, self.size - start)
+
+        while remaining > 0:
+            n = min(remaining, self.MAX_CHUNK)
+            last: Exception | None = None
+            for attempt in range(self.MAX_RETRIES):
+                try:
+                    chunk = self._fetch_once(pos, n)
+                    break
+                except Exception as e:  # noqa: BLE001 -- IncompleteRead, timeouts, resets
+                    last = e
+                    if attempt == self.MAX_RETRIES - 1:
+                        raise OSError(
+                            f"range {pos}-{pos + n - 1} failed after "
+                            f"{self.MAX_RETRIES} attempts: {last}"
+                        ) from last
+                    time.sleep(0.5 * (2**attempt))
+                    # The CDN redirect can expire mid-run; re-resolve on later retries.
+                    if attempt >= 2:
+                        try:
+                            self.url = str(self._client.head(self.orig_url).url)
+                        except Exception:  # noqa: BLE001 -- keep the old url and retry
+                            pass
+
+            if not chunk:
+                break
+            out += chunk
+            pos += len(chunk)
+            remaining -= len(chunk)
+
+        self.bytes_fetched += len(out)
+        return bytes(out)
 
     def read(self, n: int = -1) -> bytes:
         if n is None or n < 0:

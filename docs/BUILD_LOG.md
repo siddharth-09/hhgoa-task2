@@ -11,15 +11,22 @@ Updated after every successful run. Newest entries at the bottom.
 
 | Area | Decision | Why |
 |---|---|---|
-| STT | Sarvam | Indic + code-mixed speech; dataset is Indic |
-| Generation | Claude Haiku 4.5 | Fast, strong grounded answering + structured output |
+| STT | Sarvam Saaras v3 | Indic + code-mixed speech; dataset is Indic |
+| Generation | 4-model chain across 3 vendors, Gemini primary | Bedrock (Claude Haiku) blocked by AWS Free Plan; free tiers throttle, so vendor diversity is the recovery path |
 | Embeddings | `intfloat/multilingual-e5-small` (384-dim, ONNX) | Multilingual — bge-small is English-only and fails on Devanagari |
 | Vector index | `hnswlib` | Builds clean on ARM; `faiss-cpu` aarch64 wheels are unreliable |
-| Sparse index | `bm25s` | Pure numpy, ARM-safe |
+| Sparse index | `bm25s` | Pure numpy, ARM-safe. **Caveat: O(corpus) — 30ms at 201k chunks, see below** |
+| Serving ensemble | `fixed_256 + semantic_128 + metadata_128` | Chosen by ablation, not intuition |
 | Region | `ap-south-1` (Mumbai) | Closest to judges — biggest single lever on end-to-end latency |
-| Dev + ingestion | EC2 Graviton (arm64) | Latency numbers must be measured on the serving architecture, not a Mac |
-| Serving | AWS App Runner (fallback: HF Spaces) | Managed HTTPS, near-zero ops; $120 credit, 185 days left |
+| Ingestion | Wherever is free; index is a portable artifact | Architecture-independent, so build anywhere and serve anywhere |
+| Serving | TBD — HF Spaces / Oracle / App Runner | App Runner needs the AWS Paid Plan, same block as Bedrock |
 | Interface | Web page (phone IVR only as a bonus layer) | "Live working link" is a submission requirement and an auto-reject check |
+
+> Two of these changed under measurement rather than opinion. Generation moved off
+> Claude Haiku because the AWS Free Plan blocks Bedrock inference outright. Ingestion
+> moved off EC2 Graviton because the Free Plan blocks `c7g` too — and because the
+> index turns out to be architecture-independent, so the "must build on the serving
+> arch" reasoning was wrong. Only *benchmarks* need the serving box.
 
 ### Rejected, with reasons
 
@@ -562,19 +569,154 @@ actual definition.
 | 5 | Harness | orchestrated, retries, structured I/O, real fallback |
 | 6 | Guardrails | refuse / abstain / verify, both sides of generation |
 
+## 2026-08-14 — Day 2: full-scale ingest
+
+### Full index built — 20k queries, 2 languages
+`--langs hin mar --max-queries 10000 --variants fixed_256 semantic_128 metadata_128`
+
+```
+hin 10,000 queries   mar 10,000 queries   ->  199,668 passages
+fixed_256     201,298 chunks
+semantic_128  ~240,000 chunks
+metadata_128  ~244,000 chunks
+```
+
+Measured stage timings (M4, 3 threads, Docker):
+
+| Stage | Time | Rate |
+|---|---:|---|
+| download 2 shards (7.4GB) | ~13 min | ~10 MB/s |
+| extract both languages | ~5 min | |
+| chunk:fixed_256 | 36.4s | |
+| **chunk:semantic_128** | **3,372.7s (56 min)** | ~600k sentence embeddings |
+| chunk:metadata_128 | 76.8s | |
+| embed:fixed_256 | 2,956.3s (49 min) | **68/s sustained** |
+
+> Estimate correction: semantic chunking was predicted at ~30 min and took 56. It embeds
+> every sentence before choosing cut points, so it scales with sentence count, not passages.
+
+### Streaming vs download — streaming was solving the wrong problem
+`--stream` was built for Oracle, whose disk is 89% full. On a laptop with 78GB free it is
+strictly worse, and the first full run died proving it:
+
+```
+IncompleteRead(132497 bytes read, 34094644 more expected)
+```
+
+Fixes applied to `HttpRangeFile` before the realisation (still worth having for
+disk-constrained hosts): range requests capped at 8MB, 5 retries with exponential backoff,
+CDN redirect re-resolution, and **connection pooling via httpx**. That last one mattered
+most — `urllib.urlopen` opens a fresh TLS connection per range read, and a streamed parquet
+issues dozens. Handshakes, not bytes, dominated: a 300-query extract took **>6 minutes**
+while transferring only tens of MB.
+
+**Then dropped `--stream` entirely on the Mac.** 7.4GB downloaded once at 10 MB/s is ~13
+minutes, `hf_hub_download` resumes on failure, and every subsequent read is local. The whole
+class of bug disappears.
+
+> Lesson worth keeping: an hour went into hardening a code path that existed to satisfy a
+> constraint the current machine did not have.
+
+### Incremental ingest
+Growing the corpus now costs the delta, not a rebuild — `max_queries` is a *target total*,
+and each stage extends rather than restarts:
+
+- `download` skips `query_id`s already on disk
+- `chunk` skips passages already chunked for that variant, appends the rest
+- `embed` embeds only the tail and **concatenates** onto the existing `.npy`
+- `index` rebuilds when chunk count changed (~13s/20k chunks — never the bottleneck)
+
+> Caught by testing before the long run: the first version *replaced* the vector file
+> instead of appending, leaving 2,000 vectors against 22,111 chunks. Silent misalignment —
+> the index would still build and still return results, just wrong ones. There is now an
+> explicit `vectors == chunks` assertion that refuses to write a misaligned file.
+>
+> Verified: 2,000 → 2,200 queries, all three variants aligned afterwards.
+
+### Hardware measurements — threads do not help
+| threads | throughput |
+|---:|---:|
+| 3 | **398.6 texts/s** |
+| 6 | 312.1 texts/s |
+| 8 | 343.0 texts/s |
+
+More cores are *slower*. e5-small is too small for thread-sync overhead to pay off, and the
+M4's 6 efficiency cores drag the 4 performance cores. The 3-CPU cap (written for the shared
+Oracle box) is accidentally near-optimal.
+
+GPU path prepared but unused: `Dockerfile.gpu` + `docs/GPU_SETUP.md`, with `default_variant()`
+selecting fp32 on CUDA (int8 is a CPU optimisation and can be *slower* on GPU) and batch 256
+instead of 64. The container asserts on `CUDAExecutionProvider` because a CUDA/cuDNN mismatch
+does not raise — onnxruntime silently falls back to CPU and you get a "successful" 3-hour run.
+
+### **OPEN RISK: sparse retrieval does not scale**
+Benchmark of the full index (`fixed_256`, 201,298 chunks, 300 queries, x86_64):
+
+```
+embed_query       P50  5.06   P100  94.66
+search_dense      P50  0.89   P100  10.01   <- HNSW scales logarithmically
+search_sparse     P50 30.13   P100  48.14   <- 30x worse than pilot
+retrieval_total   P50 60.35   P100 137.67
+cold first query 249.30ms (excluded — measures warmup)
+```
+
+BM25 went **~1ms → 30ms** for 9x more data. `bm25s` scores by sparse matrix multiplication,
+which is **O(corpus size)**; HNSW is not. Sparse is now half the retrieval budget.
+
+**The unmeasured danger:** that benchmark used *one* index. `AdaptiveRetriever` queries
+*three*, **serially**:
+
+```
+3 x ~60ms retrieval + ~40ms extract  ~=  220ms   -> OVER the 200ms budget
+```
+
+Invisible on the pilot (3 x 1ms was free). Fixes in order of value:
+1. **Parallelise the fan-out** — the three queries are independent; a thread pool makes the
+   ensemble cost the slowest index rather than the sum. ~20 lines, no quality change.
+2. Cut sparse `k` (currently 30 candidates per index).
+3. Drop `metadata_128` — it bought +1.0% R@10, which is a poor trade at 60ms.
+
+**Do not report a latency number until the ensemble is measured at full scale.**
+
+### Machine + transfer logistics
+Full ingest completed on a second (x86_64, Windows) machine from the same repo. The Mac's
+duplicate run was stopped ~1/3 through embedding.
+
+- Index is **architecture-independent** — build anywhere, serve anywhere. Only *benchmarks*
+  need the serving box.
+- Transfer of the ~2GB artifact went through several failed attempts worth recording:
+  `aws s3 presign` only signs GET, not PUT; a presigned PUT signed for `ap-south-1` against
+  the *global* `s3.amazonaws.com` endpoint fails with `InvalidAccessKeyId` (region mismatch);
+  and the chat channel masks `AKIA...` patterns, so the URL had to be assembled client-side
+  from a `<<KEYID>>` template.
+- Working method: regional endpoint (`s3.ap-south-1.amazonaws.com`) + PowerShell `.Replace()`
+  to splice the key ID in. **Google Drive would have been faster** — no credentials in a URL.
+
+### Mac state at end of session
+```
+pilot index (working demo)   fixed_256 22,111 · semantic_128 26,421 · metadata_128 26,707
+raw corpus                   hin 10,000 · mar 10,000  (extraction complete)
+partial                      vectors/full/fixed_256.npy  (superseded by the transfer)
+```
+The pilot index still serves, so development is never blocked on the transfer.
+
+### Repo
+First commit `ea51298`, 32 files, no secrets (`.env` gitignored, scan clean).
+**Not yet pushed** — `gh` is authenticated as `siddharth-09`; needs
+`gh repo create ... --source=. --push`. A GitHub link is a submission requirement.
+
+---
+
 ### Open items
+- [ ] **Import the transferred index, verify alignment, benchmark the ENSEMBLE** (the open risk above)
 - [ ] `api/` + `web/` — the mic page and the "live working link"
-- [ ] Formal benchmark run (200+ queries) for the README numbers
-- [ ] Full-scale ingest (25k x 2 languages) to replace the 2k pilot index
+- [ ] Formal benchmark run on the full index for the README numbers
+- [ ] Push repo to GitHub (5 min, unblocks a submission requirement)
 - [ ] Deployment + domain
 - [ ] Videos, social posts (the automated screening gate)
-- [ ] Pilot #2 eval — does document granularity rescue the chunking story?
-- [ ] Measure single-query embed latency (`bench/latency.py`, written, not yet run) —
-      the one unmeasured term in the 200ms budget
 - [ ] Cross-encoder reranker: documented best lever for MSMARCO, but ~4× e5-small per pair
       → likely 200–500ms for 8 candidates on CPU. Belongs on the quality path, not the fast path.
-- [ ] Not yet written: `core/harness.py`, `core/guardrails.py`, `api/`, `web/`
-- [ ] Waiting on: teammate SSH key on the Oracle box
+- [ ] Not yet written: `api/`, `web/`
 - [ ] Budget alarm at $50 (console only — IAM users can't reach billing APIs by default)
 - [ ] Namecheap `.me` domain (keeps the submitted link stable across any migration)
 - [ ] Social post plan — per member, 3 platforms, `#RAGInGoa`, ≥1 public Instagram
