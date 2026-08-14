@@ -17,10 +17,10 @@ All six technical requirements are met and verifiable live.
 |---|---|---|
 | 1 | Speech-to-text (Sarvam) | Saaras v3, verified by a human speaking into it |
 | 2 | Chunking "vast" | 12 variants, 7-subset ablation with paired CIs, live `/compare` |
-| 3 | Under 200ms | **P50 55ms · P70 60ms · P100 104ms · 100/100** |
+| 3 | Under 200ms | **P50 52ms · P70 58ms · P100 100ms · 100/100** |
 | 4 | P50/P70/P100 | Measured + reproducible live via `/benchmark` |
 | 5 | Harness | Orchestration, 4-provider fallback chain, typed I/O |
-| 6 | Guardrails | refuse / abstain / greeting / verify — behavioural suite green |
+| 6 | Guardrails | refuse / abstain / greeting / verify — **20/20 behavioural cases** |
 
 **Not done, and blocking submission:** two videos, social posts by every team
 member (Instagram + X + LinkedIn, `#RAGInGoa`, ≥1 public Instagram), submission
@@ -55,7 +55,7 @@ The full command is in the session log; `.env` on the box holds all keys and is
 
 ```
 index          metadata_128 (241,572 chunks) for Devanagari
-               english_256 for Latin-script queries        <- new, see below
+               english_256  (98,836 chunks)  for Latin-script queries
 corpus         20,000 queries / 199,668 passages (hin + mar)
 embedder       multilingual-e5-small, int8, avx512_vnni on x86
 LLM primary    groq:llama-3.3-70b-versatile
@@ -112,6 +112,35 @@ declining because retrieval did not surface an answer. That ceiling is retrieval
 - **Borderline support defers to the LLM** rather than a threshold. Honest note:
   this rescued **0 of 40** queries in testing. The principle is right; the measured
   benefit on this corpus is nil.
+
+### English index — built and live (2026-08-15)
+MSMARCO-XI ships every passage twice: the original English and the Indic
+translation. Only the translation was ever indexed, so an English question could
+not reach an answer the corpus demonstrably held.
+
+- 98,812 deduped English passages (the source is shared across language shards,
+  so 199,668 rows hold only 98,812 distinct passages), 98,836 chunks, 240MB
+- Built from `data/raw/*.jsonl` -- **nothing was re-downloaded**
+- 21.6 min to embed at 76/s: `docker compose run --rm bench python -m ingest.build_english`
+- Routed by **script**, not detected language (`core/retriever.is_latin_query`,
+  threshold 0.9). Script is observable; language is a guess, and the guess is
+  wrong exactly where it matters -- romanised Hindi is Latin script but Hindi.
+- Additive: a query with real Devanagari content never leaves the path that
+  already worked.
+
+Measured effect:
+
+    What is the capital of India?   0.359 abstain  ->  0.793 generated  [english]
+    भारत की राजधानी क्या है?          0.787 generated ->  unchanged        [indic]
+    who is the prime minister...    abstain      ->  abstain           [english]
+
+That third line is the one that mattered. The pilot warned the English index
+raises support across the board, so an out-of-corpus English question could have
+started answering confidently from loosely-related text. It still abstains.
+
+`/compare` deliberately excludes the English index -- it is a different corpus,
+not a different chunking strategy, and listing it there would compare unlike
+things.
 
 ### Reverted after measurement
 - `context_passages` 4 → 8 → **back to 4**. Gold recall does improve with a wider
