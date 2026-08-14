@@ -165,8 +165,13 @@ function renderAnswer(d, tier) {
   const t1 = document.querySelector('.tier.t1');
   const t2 = document.querySelector('.tier.t2');
   setTier(t1, 'active', ms(d.fast_path_ms));
+  // "generated" alone is ambiguous when the model returns the extracted span
+  // verbatim -- which it does whenever that span is already a complete answer.
+  // Distinguishing rewritten from unchanged shows the LLM had an effect (or
+  // honestly reports that it had none) instead of leaving the viewer guessing.
+  const rewritten = !!d.generated_answer && d.generated_answer !== d.extractive_answer;
   if (tier === 'generated') {
-    setTier(t2, 'active', ms(d.total_ms));
+    setTier(t2, 'active', `${ms(d.total_ms)} · ${rewritten ? 'rewritten' : 'unchanged'}`);
   } else if (tier === 'pending') {
     setTier(t2, 'pending', '···');
   } else if (d.reason === 'llm_reported_insufficient') {
@@ -192,9 +197,24 @@ function renderAnswer(d, tier) {
   if (d.support   != null) v.push(`<span class="v">support ${d.support.toFixed(3)}</span>`);
   if (d.grounding != null) v.push(`<span class="v">grounding ${d.grounding.toFixed(3)}</span>`);
   if (d.citations?.length) v.push(`<span class="v good">cited [${d.citations.join(', ')}]</span>`);
+  if (src === 'generated') {
+    v.push(rewritten
+      ? `<span class="v good">LLM rewrote the span</span>`
+      : `<span class="v">LLM returned the span verbatim — nothing to improve</span>`);
+  }
   if (d.stt_ms)   v.push(`<span class="v">STT ${ms(d.stt_ms)} · outside budget</span>`);
   if (d.llm_error) v.push(`<span class="v bad">LLM ${esc(d.llm_error.slice(0, 48))}</span>`);
   $('#verdicts').innerHTML = v.join('');
+
+  const before = $('#beforeAfter');
+  if (before) {
+    before.innerHTML = rewritten
+      ? `<details><summary>what the LLM changed ↘</summary>
+           <div class="src"><b>01 extracted</b><br>${esc(d.extractive_answer)}</div>
+           <div class="src" style="border-color:var(--grounded)"><b>02 generated</b><br>${esc(d.generated_answer)}</div>
+         </details>`
+      : '';
+  }
 
   $('#sources').innerHTML = d.sources?.length
     ? `<details><summary>${d.sources.length} retrieved passages ↘</summary>` +
