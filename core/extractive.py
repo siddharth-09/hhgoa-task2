@@ -66,6 +66,69 @@ MAX_SPAN_SENTENCES = 2
 MAX_EMBED = 10
 ALWAYS_KEEP_FROM_TOP_HIT = 3
 
+# Batch size for the sentence-embedding pass, and the two reasons it is not 64.
+#
+# Measured (300 queries, full index, aarch64): `embed_sentences` is 99.5% of this
+# stage -- 31.8ms of 32.0ms at P50, 180ms of 180.2ms at P99 -- and its latency
+# correlates with the *longest* sentence in the batch at 0.84, with the *number*
+# of sentences at 0.02. The slowest decile embeds the same ~8.8 sentences as the
+# median; its longest is 387 chars against 152.
+#
+# Cause: the tokenizer pads a batch to its longest member. Embedder._encode sorts
+# by length to avoid exactly this, but the sort only pays off across several
+# batches, and 10 sentences is a single batch of 64 -- so one 1,279-char sentence
+# made the other nine cost the same as itself.
+#
+# Embedding one sentence at a time removes the padding entirely. Measured over
+# the same 300 queries and identical cached retrieval (bench/tune_extract.py):
+#
+#   batch  P50     P95     P99      P100     identical to reference
+#   64     32.33   66.87   185.37   227.52   90.7%
+#    8     28.55   50.14   156.37   179.47   91.7%
+#    4     26.53   41.61    97.09   103.95   91.0%
+#    2     26.17   36.94    68.01    76.91   93.3%
+#    1     24.14   34.24    48.58    81.73   100%     <-
+#
+# Batch 1 is fastest at every percentile through P99 *and* is the fidelity
+# reference, which is the counter-intuitive part and worth stating plainly:
+#
+# A bigger batch is not a more accurate configuration that we trade away for
+# speed -- it is less accurate. The served model is dynamically quantised int8,
+# so activation scales are computed at runtime from a tensor spanning the batch.
+# One long padded member widens that range and coarsens the quantisation of every
+# short sentence beside it. Measured directly on one text: batched against a long
+# sentence moves its vector by 1.0e-02 (cos 0.9981); at batch 1 it is bitwise
+# identical to embedding it alone. In fp32 the same comparison drifts 4.7e-08 --
+# so this is a quantisation effect, not a pooling bug.
+#
+# Batching therefore buys nothing here in either dimension. It is a throughput
+# optimisation, and this path has a batch of ten.
+EMBED_BATCH = 1
+
+# Hard cap on the text handed to the encoder, or 0 to disable.
+#
+# batch=1 removes the *amplification* -- nine short sentences paying for one long
+# one -- but not the cost of the long sentence itself, which is superlinear in
+# length. On the single-index configuration that remainder is the whole tail:
+# P99 127ms against a P50 of 25ms.
+#
+# Measured on metadata_128, 300 queries, batch=1 throughout:
+#
+#   trunc   P50     P95     P99      P100     identical to untruncated
+#   none    24.57   64.98   127.10   129.28   100%
+#   512     33.40   42.15    85.15   145.68    99.0%
+#   256     33.63   43.93    51.97    55.80    98.3%   <-
+#   192     34.92   44.16    50.87    76.92    96.3%
+#
+# 256 chars cuts P99 by 2.4x and P100 by 2.3x while changing 1 answer in 60, and
+# mean support moves 0.6511 -> 0.6501. It costs ~9ms at P50, which is the honest
+# part of the trade: this buys tail predictability, not median speed.
+#
+# Truncation applies only to the copy sent to the encoder. The returned span and
+# its citation remain the full sentence, so a long answer is still served whole --
+# only its *ranking* is decided on the first 256 characters.
+MAX_SENTENCE_CHARS = 256
+
 
 @dataclass(slots=True)
 class Citation:
@@ -81,6 +144,14 @@ class ExtractiveAnswer:
     citations: list[Citation] = field(default_factory=list)
     n_candidates: int = 0
     took_ms: float = 0.0
+    # Per-stage breakdown. This stage owns the whole over-budget tail (P99 175ms
+    # against a ~10ms budget for everything else), so it has to be attributable
+    # rather than a single opaque number.
+    stage_ms: dict[str, float] = field(default_factory=dict)
+    # Tail diagnostics: the embedding batch is padded to its longest member, so
+    # cost tracks max sentence length, not the mean.
+    n_sentences_embedded: int = 0
+    max_sentence_chars: int = 0
 
     @property
     def is_empty(self) -> bool:
@@ -99,12 +170,20 @@ def extract_answer(
     alpha: float = ALPHA,
     max_span: int = MAX_SPAN_SENTENCES,
     max_embed: int = MAX_EMBED,
+    embed_batch: int = EMBED_BATCH,
+    max_sentence_chars: int = MAX_SENTENCE_CHARS,
 ) -> ExtractiveAnswer:
     """Select the best-supported span across the top retrieved chunks.
 
     `hits` is any sequence exposing .text and .passage_id (Hit or FusedHit).
     """
     t0 = time.perf_counter()
+    stage: dict[str, float] = {}
+
+    def mark(name: str, since: float) -> float:
+        now = time.perf_counter()
+        stage[name] = round((now - since) * 1000, 3)
+        return now
 
     # Candidate sentences, remembering which unit each came from and its
     # position, so adjacent sentences can be merged into one span.
@@ -127,8 +206,10 @@ def extract_answer(
 
     if not sentences:
         return ExtractiveAnswer(text="", support=0.0, took_ms=(time.perf_counter() - t0) * 1000)
+    t_split = mark("split_sentences", t0)
 
     lex_all = np.array([lexical_overlap(query, s) for s in sentences], dtype=np.float32)
+    t_lex = mark("lexical_overlap", t_split)
 
     # Prefilter before the embedding pass -- this is the latency win.
     n_total = len(sentences)
@@ -144,9 +225,16 @@ def extract_answer(
         lex = lex_all[idx]
     else:
         lex = lex_all
+    t_pre = mark("prefilter", t_lex)
 
-    # One batched forward pass over the surviving candidates.
-    svecs = embedder.encode_passages(sentences)
+    # Embedding pass over the surviving candidates. `sentences` itself is never
+    # truncated -- only the text handed to the encoder is -- so the returned span
+    # and its citation stay verbatim.
+    to_embed = sentences
+    if max_sentence_chars:
+        to_embed = [s[:max_sentence_chars] for s in sentences]
+    svecs = embedder.encode_passages(to_embed, batch_size=embed_batch)
+    t_embed = mark("embed_sentences", t_pre)
     cos = svecs @ qvec  # both L2-normalised -> dot == cosine
 
     # Cosine for e5 lives roughly in [0.7, 0.95] for related text, so rescale
@@ -181,10 +269,15 @@ def extract_answer(
             cited_units.append(u)
             citations.append(Citation(unit_id=u, text=sentences[j], score=float(scores[j])))
 
+    mark("score_and_span", t_embed)
+
     return ExtractiveAnswer(
         text=text,
         support=float(scores[best]),
         citations=citations,
         n_candidates=len(sentences),
         took_ms=round((time.perf_counter() - t0) * 1000, 3),
+        stage_ms=stage,
+        n_sentences_embedded=len(sentences),
+        max_sentence_chars=max((len(s) for s in sentences), default=0),
     )

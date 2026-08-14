@@ -132,7 +132,7 @@ class Embedder:
         norms = np.linalg.norm(pooled, axis=1, keepdims=True)
         return (pooled / np.clip(norms, 1e-12, None)).astype(np.float32)
 
-    def _encode(self, texts: list[str], prefix: str) -> np.ndarray:
+    def _encode(self, texts: list[str], prefix: str, batch_size: int | None = None) -> np.ndarray:
         """Batch with length bucketing, then restore the caller's order.
 
         The tokenizer pads each batch to its longest member. MSMARCO passages
@@ -144,6 +144,13 @@ class Embedder:
         Character count is used as the length proxy: it correlates well enough
         with token count and costs nothing, whereas tokenising twice would
         defeat the purpose.
+
+        `batch_size` overrides the configured size for one call. Bucketing only
+        helps when a call spans several batches: the extractive path embeds ~10
+        sentences, which is one batch of 64, so every short sentence pads up to
+        the longest and the sort does nothing. A smaller batch there restores
+        the effect. Doing so cannot change the vectors -- mean pooling is taken
+        over the attention mask, so padding is excluded from the result.
         """
         if not texts:
             return np.zeros((0, DIM), dtype=np.float32)
@@ -152,7 +159,7 @@ class Embedder:
         order = sorted(range(len(prefixed)), key=lambda i: len(prefixed[i]))
 
         out = np.empty((len(prefixed), DIM), dtype=np.float32)
-        bs = self.cfg.batch_size
+        bs = batch_size or self.cfg.batch_size
         for i in range(0, len(order), bs):
             idx = order[i : i + bs]
             out[idx] = self._forward([prefixed[j] for j in idx])
@@ -167,8 +174,8 @@ class Embedder:
     def encode_queries(self, texts: list[str]) -> np.ndarray:
         return self._encode(texts, "query: ")
 
-    def encode_passages(self, texts: list[str]) -> np.ndarray:
-        return self._encode(texts, "passage: ")
+    def encode_passages(self, texts: list[str], batch_size: int | None = None) -> np.ndarray:
+        return self._encode(texts, "passage: ", batch_size)
 
 
 if __name__ == "__main__":

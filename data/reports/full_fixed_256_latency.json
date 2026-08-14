@@ -1,0 +1,58 @@
+{
+  "tag": "full",
+  "variant": "fixed_256",
+  "n_chunks": 201298,
+  "n_queries": 300,
+  "machine": "x86_64",
+  "embedder_variant": "int8_x86",
+  "threads": "auto",
+  "cold_first_query_ms": {
+    "embed_query": 85.692,
+    "search_dense": 5.087,
+    "search_sparse": 133.215,
+    "search_fused_total": 25.329,
+    "retrieval_total": 249.297
+  },
+  "stages_ms": {
+    "embed_query": {
+      "p50": 5.061,
+      "p70": 5.835,
+      "p90": 7.301,
+      "p99": 18.527,
+      "p100": 94.655,
+      "mean": 5.833
+    },
+    "search_dense": {
+      "p50": 0.89,
+      "p70": 1.044,
+      "p90": 1.55,
+      "p99": 5.263,
+      "p100": 10.014,
+      "mean": 1.086
+    },
+    "search_sparse": {
+      "p50": 30.133,
+      "p70": 31.799,
+      "p90": 33.634,
+      "p99": 44.42,
+      "p100": 48.142,
+      "mean": 19.075
+    },
+    "search_fused_total": {
+      "p50": 24.324,
+      "p70": 26.398,
+      "p90": 28.277,
+      "p99": 33.231,
+      "p100": 38.966,
+      "mean": 16.694
+    },
+    "retrieval_total": {
+      "p50": 60.352,
+      "p70": 64.45,
+      "p90": 68.647,
+      "p99": 83.037,
+      "p100": 137.67,
+      "mean": 42.672
+    }
+  }
+}

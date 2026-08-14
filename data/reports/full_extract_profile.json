@@ -1,0 +1,95 @@
+{
+  "tag": "full",
+  "ensemble": [
+    "fixed_256",
+    "semantic_128",
+    "metadata_128"
+  ],
+  "langs": [
+    "hin",
+    "mar"
+  ],
+  "n_queries": 300,
+  "machine": "aarch64",
+  "embedder_variant": "int8_arm",
+  "threads": "3",
+  "seed": 7,
+  "extract_total_ms": {
+    "p50": 31.956,
+    "p70": 38.047,
+    "p90": 49.858,
+    "p95": 68.027,
+    "p99": 180.194,
+    "p100": 210.005,
+    "mean": 37.357
+  },
+  "stages_ms": {
+    "split_sentences": {
+      "p50": 0.065,
+      "p70": 0.075,
+      "p90": 0.094,
+      "p95": 0.104,
+      "p99": 0.116,
+      "p100": 0.125,
+      "mean": 0.067
+    },
+    "lexical_overlap": {
+      "p50": 0.058,
+      "p70": 0.069,
+      "p90": 0.084,
+      "p95": 0.093,
+      "p99": 0.114,
+      "p100": 0.589,
+      "mean": 0.062
+    },
+    "prefilter": {
+      "p50": 0.001,
+      "p70": 0.009,
+      "p90": 0.01,
+      "p95": 0.011,
+      "p99": 0.015,
+      "p100": 0.022,
+      "mean": 0.005
+    },
+    "embed_sentences": {
+      "p50": 31.779,
+      "p70": 37.902,
+      "p90": 49.706,
+      "p95": 67.874,
+      "p99": 180.014,
+      "p100": 209.83,
+      "mean": 37.191
+    },
+    "score_and_span": {
+      "p50": 0.029,
+      "p70": 0.03,
+      "p90": 0.034,
+      "p95": 0.038,
+      "p99": 0.068,
+      "p100": 0.14,
+      "mean": 0.031
+    }
+  },
+  "tail_vs_body": {
+    "slowest_10pct": {
+      "n": 30,
+      "took_ms_mean": 91.62,
+      "embed_ms_mean": 91.42,
+      "n_sentences_mean": 8.73,
+      "max_chars_mean": 387.4,
+      "max_chars_max": 1279
+    },
+    "fastest_50pct": {
+      "n": 150,
+      "took_ms_mean": 25.45,
+      "embed_ms_mean": 25.3,
+      "n_sentences_mean": 8.81,
+      "max_chars_mean": 151.9,
+      "max_chars_max": 344
+    }
+  },
+  "correlation_with_took_ms": {
+    "max_sentence_chars": 0.8411,
+    "n_sentences_embedded": 0.0166
+  }
+}

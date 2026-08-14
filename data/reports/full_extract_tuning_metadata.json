@@ -1,0 +1,198 @@
+{
+  "tag": "full",
+  "ensemble": [
+    "metadata_128"
+  ],
+  "langs": [
+    "hin",
+    "mar"
+  ],
+  "n_queries": 300,
+  "machine": "aarch64",
+  "embedder_variant": "int8_arm",
+  "threads": "3",
+  "seed": 7,
+  "reference": "embed_batch=1, max_sentence_chars=0 (each sentence quantised alone)",
+  "configs": [
+    {
+      "embed_batch": 1,
+      "max_sentence_chars": 0,
+      "extract_ms": {
+        "p50": 24.566,
+        "p70": 26.559,
+        "p90": 29.759,
+        "p95": 64.977,
+        "p99": 127.098,
+        "p100": 129.276,
+        "mean": 28.086
+      },
+      "identical_to_reference": 1.0,
+      "mean_support": 0.6511
+    },
+    {
+      "embed_batch": 64,
+      "max_sentence_chars": 0,
+      "extract_ms": {
+        "p50": 33.486,
+        "p70": 40.36,
+        "p90": 57.081,
+        "p95": 125.829,
+        "p99": 482.572,
+        "p100": 636.067,
+        "mean": 52.422
+      },
+      "identical_to_reference": 0.8833,
+      "mean_support": 0.6508
+    },
+    {
+      "embed_batch": 8,
+      "max_sentence_chars": 0,
+      "extract_ms": {
+        "p50": 29.54,
+        "p70": 33.185,
+        "p90": 48.833,
+        "p95": 125.907,
+        "p99": 438.598,
+        "p100": 550.98,
+        "mean": 46.809
+      },
+      "identical_to_reference": 0.9067,
+      "mean_support": 0.6506
+    },
+    {
+      "embed_batch": 4,
+      "max_sentence_chars": 0,
+      "extract_ms": {
+        "p50": 27.312,
+        "p70": 29.642,
+        "p90": 34.799,
+        "p95": 77.383,
+        "p99": 254.651,
+        "p100": 326.011,
+        "mean": 36.408
+      },
+      "identical_to_reference": 0.9067,
+      "mean_support": 0.6508
+    },
+    {
+      "embed_batch": 2,
+      "max_sentence_chars": 0,
+      "extract_ms": {
+        "p50": 26.998,
+        "p70": 29.841,
+        "p90": 33.738,
+        "p95": 72.187,
+        "p99": 197.45,
+        "p100": 204.304,
+        "mean": 33.314
+      },
+      "identical_to_reference": 0.91,
+      "mean_support": 0.6506
+    },
+    {
+      "embed_batch": 4,
+      "max_sentence_chars": 512,
+      "extract_ms": {
+        "p50": 27.418,
+        "p70": 30.245,
+        "p90": 35.069,
+        "p95": 42.605,
+        "p99": 129.477,
+        "p100": 234.863,
+        "mean": 30.642
+      },
+      "identical_to_reference": 0.9067,
+      "mean_support": 0.6506
+    },
+    {
+      "embed_batch": 4,
+      "max_sentence_chars": 256,
+      "extract_ms": {
+        "p50": 29.16,
+        "p70": 31.16,
+        "p90": 35.255,
+        "p95": 38.489,
+        "p99": 58.613,
+        "p100": 85.892,
+        "mean": 29.451
+      },
+      "identical_to_reference": 0.8967,
+      "mean_support": 0.6501
+    },
+    {
+      "embed_batch": 4,
+      "max_sentence_chars": 192,
+      "extract_ms": {
+        "p50": 29.532,
+        "p70": 32.389,
+        "p90": 35.728,
+        "p95": 39.073,
+        "p99": 51.866,
+        "p100": 61.905,
+        "mean": 29.78
+      },
+      "identical_to_reference": 0.89,
+      "mean_support": 0.6486
+    },
+    {
+      "embed_batch": 2,
+      "max_sentence_chars": 256,
+      "extract_ms": {
+        "p50": 31.383,
+        "p70": 34.084,
+        "p90": 38.225,
+        "p95": 40.592,
+        "p99": 51.523,
+        "p100": 80.633,
+        "mean": 31.644
+      },
+      "identical_to_reference": 0.8967,
+      "mean_support": 0.6497
+    },
+    {
+      "embed_batch": 1,
+      "max_sentence_chars": 512,
+      "extract_ms": {
+        "p50": 33.395,
+        "p70": 35.928,
+        "p90": 38.927,
+        "p95": 42.153,
+        "p99": 85.152,
+        "p100": 145.682,
+        "mean": 33.934
+      },
+      "identical_to_reference": 0.99,
+      "mean_support": 0.6507
+    },
+    {
+      "embed_batch": 1,
+      "max_sentence_chars": 256,
+      "extract_ms": {
+        "p50": 33.633,
+        "p70": 36.858,
+        "p90": 40.725,
+        "p95": 43.933,
+        "p99": 51.969,
+        "p100": 55.796,
+        "mean": 33.703
+      },
+      "identical_to_reference": 0.9833,
+      "mean_support": 0.6501
+    },
+    {
+      "embed_batch": 1,
+      "max_sentence_chars": 192,
+      "extract_ms": {
+        "p50": 34.924,
+        "p70": 37.589,
+        "p90": 41.904,
+        "p95": 44.157,
+        "p99": 50.872,
+        "p100": 76.92,
+        "mean": 34.824
+      },
+      "identical_to_reference": 0.9633,
+      "mean_support": 0.6489
+    }
+  ]
+}

@@ -62,15 +62,29 @@ class ChunkIndex:
         ef_construction: int = 200,
         ef_search: int = 96,
         bm25_texts: list[str] | None = None,
+        display_texts: list[str] | None = None,
     ) -> None:
-        """Build both indexes. `vectors` must be L2-normalised, row-aligned to `chunks`."""
+        """Build both indexes. `vectors` must be L2-normalised, row-aligned to `chunks`.
+
+        Three views of the same chunk, because they have different jobs:
+
+          embedded   `c["text"]` -- what produced `vectors`. The metadata strategy
+                     prepends a query-type hint here on purpose.
+          bm25_texts lexical matching, where that hint would be noise.
+          display_texts what the user is shown and what the extractive answer is
+                     drawn from. The hint must not appear in an answer -- it is an
+                     indexing device, not content.
+
+        `display_texts` defaults to the embedded text, which is correct for every
+        strategy that does not rewrite it.
+        """
         n = len(chunks)
         if vectors.shape != (n, DIM):
             raise ValueError(f"vectors {vectors.shape} != ({n}, {DIM})")
 
         self.chunk_ids = [c["chunk_id"] for c in chunks]
         self.passage_ids = [c["passage_id"] for c in chunks]
-        self.texts = [c["text"] for c in chunks]
+        self.texts = display_texts if display_texts is not None else [c["text"] for c in chunks]
         self.query_types = [c["query_type"] for c in chunks]
         self.langs = [c["lang"] for c in chunks]
 

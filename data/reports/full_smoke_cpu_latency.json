@@ -1,0 +1,113 @@
+{
+  "tag": "full",
+  "ensemble": [
+    "fixed_256",
+    "semantic_128",
+    "metadata_128"
+  ],
+  "n_chunks": {
+    "fixed_256": 201298,
+    "semantic_128": 239175,
+    "metadata_128": 241572
+  },
+  "n_queries": 40,
+  "langs": [
+    "hin",
+    "mar"
+  ],
+  "machine": "arm64",
+  "embedder_variant": "int8_arm",
+  "threads": "auto",
+  "cold_first_query_ms": {
+    "fast_path_ms": 155.586,
+    "guardrail_in": 0.016,
+    "embed_query": 5.31,
+    "retrieve": 110.709,
+    "extract": 39.317,
+    "guardrail_out": 0.226
+  },
+  "fast_path_ms": {
+    "p50": 44.469,
+    "p70": 51.422,
+    "p90": 62.403,
+    "p99": 84.211,
+    "p100": 84.838,
+    "mean": 47.858
+  },
+  "stages_ms": {
+    "guardrail_in": {
+      "p50": 0.008,
+      "p70": 0.009,
+      "p90": 0.013,
+      "p99": 0.023,
+      "p100": 0.025,
+      "mean": 0.009
+    },
+    "embed_query": {
+      "p50": 2.053,
+      "p70": 2.275,
+      "p90": 2.666,
+      "p99": 3.942,
+      "p100": 4.648,
+      "mean": 2.106
+    },
+    "retrieve": {
+      "p50": 7.941,
+      "p70": 9.164,
+      "p90": 11.425,
+      "p99": 35.62,
+      "p100": 41.231,
+      "mean": 9.12
+    },
+    "extract": {
+      "p50": 33.553,
+      "p70": 37.899,
+      "p90": 51.396,
+      "p99": 73.433,
+      "p100": 73.886,
+      "mean": 36.476
+    },
+    "guardrail_out": {
+      "p50": 0.116,
+      "p70": 0.171,
+      "p90": 0.246,
+      "p99": 0.31,
+      "p100": 0.311,
+      "mean": 0.142
+    }
+  },
+  "per_index_ms": {
+    "fixed_256": {
+      "p50": 2.092,
+      "p70": 2.428,
+      "p90": 2.975,
+      "p99": 3.513,
+      "p100": 3.687,
+      "mean": 2.154
+    },
+    "semantic_128": {
+      "p50": 1.814,
+      "p70": 2.313,
+      "p90": 3.021,
+      "p99": 3.617,
+      "p100": 3.74,
+      "mean": 2.053
+    },
+    "metadata_128": {
+      "p50": 1.831,
+      "p70": 2.199,
+      "p90": 2.975,
+      "p99": 3.269,
+      "p100": 3.413,
+      "mean": 1.929
+    }
+  },
+  "fan_out_serial_p50_ms": 5.737,
+  "fan_out_slowest_p50_ms": 2.092,
+  "answer_source": {
+    "extractive": 38,
+    "abstain": 2
+  },
+  "over_budget": 0,
+  "budget_ms": 200
+}

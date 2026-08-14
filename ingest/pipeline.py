@@ -288,10 +288,12 @@ def stage_index(chunk_paths: dict[str, Path], tag: str, force: bool) -> None:
             chunks = read_jsonl(cpath)
             vecs = np.load(DATA_ROOT / "vectors" / tag / f"{strat}.npy")
             # For the metadata strategy the type hint helps the embedding but
-            # would pollute lexical matching, so BM25 sees the untagged body.
-            bm25_texts = [c.get("extra", {}).get("raw_text") or c["text"] for c in chunks]
+            # would pollute lexical matching -- and must never reach the user, since
+            # the extractive answer is drawn from the stored text. So BM25 and the
+            # display copy both see the untagged body; only the vectors saw the hint.
+            raw_texts = [c.get("extra", {}).get("raw_text") or c["text"] for c in chunks]
             ix = ChunkIndex(strat)
-            ix.build(vecs, chunks, bm25_texts=bm25_texts)
+            ix.build(vecs, chunks, bm25_texts=raw_texts, display_texts=raw_texts)
             ix.save(root)
             print(f"  {len(ix):,} chunks indexed")
 

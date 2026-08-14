@@ -43,6 +43,23 @@ from core.guardrails import Decision, check_input, check_output
 from core.llm import GenerationResult, LLMChain, LLMClient
 from core.retriever import AdaptiveRetriever
 
+# Upper bound on the question text, in characters.
+#
+# The extractive path caps the *passage* sentences it embeds, but the query was
+# unbounded -- and the query is embedded too. Measured on 300 sampled corpus
+# queries: median 32 chars, P99 102 chars, and a single outlier at **2,717**,
+# a machine-translation artifact where one phrase repeats for the whole string.
+#
+# That one query was the entire P100. It forces a full 512-token forward pass
+# (the tokenizer's truncation limit) where a real question needs about twenty,
+# and it showed up as embed_query P99 6ms / P100 143ms -- a 23x cliff caused by
+# one row of the corpus.
+#
+# 512 characters is far above any real spoken question: STT caps audio at 30
+# seconds, which is perhaps 300 characters of speech. So this bounds the tail
+# without touching a single genuine query.
+MAX_QUERY_CHARS = 512
+
 
 @dataclass(slots=True)
 class Source:
@@ -98,9 +115,14 @@ class RAGHarness:
         threads: int = 0,
         top_k: int = 10,
         context_passages: int = 4,
+        retriever: AdaptiveRetriever | None = None,
     ):
         self.embedder = embedder or Embedder(EmbedderConfig(threads=threads))
-        self.retriever = AdaptiveRetriever.load(index_root, ensemble)
+        # An injected retriever lets several harnesses share one set of loaded
+        # indexes. The API serves one configuration but compares all of them side
+        # by side, and loading each subset separately would hold the same 2GB of
+        # index several times over.
+        self.retriever = retriever or AdaptiveRetriever.load(index_root, ensemble)
         self.llm = llm or LLMChain.from_env()
         self.top_k = top_k
         self.context_passages = context_passages
@@ -140,6 +162,11 @@ class RAGHarness:
             return r
 
         # 2-4. Fast path: embed -> retrieve -> extract.
+        # Bounded here rather than inside the embedder so that retrieval, lexical
+        # matching and extraction all see the same question text.
+        if len(question) > MAX_QUERY_CHARS:
+            question = question[:MAX_QUERY_CHARS]
+
         qvec = self.embedder.encode_query(question)
         t2 = mark("embed_query", t1)
 

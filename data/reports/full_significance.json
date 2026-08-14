@@ -1,0 +1,318 @@
+{
+  "tag": "full",
+  "langs": [
+    "hin",
+    "mar"
+  ],
+  "n_queries": 1500,
+  "top_k": 20,
+  "machine": "aarch64",
+  "seed": 7,
+  "n_bootstrap": 10000,
+  "baseline": "metadata_128",
+  "means": {
+    "metadata_128": {
+      "recall@1": 0.1838,
+      "recall@5": 0.4537,
+      "recall@10": 0.5669,
+      "recall@20": 0.6675,
+      "mrr@10": 0.303,
+      "ndcg@10": 0.362
+    },
+    "fixed_256": {
+      "recall@1": 0.1654,
+      "recall@5": 0.4367,
+      "recall@10": 0.5601,
+      "recall@20": 0.6607,
+      "mrr@10": 0.2895,
+      "ndcg@10": 0.3503
+    },
+    "fixed+metadata": {
+      "recall@1": 0.1708,
+      "recall@5": 0.4429,
+      "recall@10": 0.5684,
+      "recall@20": 0.6697,
+      "mrr@10": 0.2973,
+      "ndcg@10": 0.3582
+    },
+    "ENSEMBLE": {
+      "recall@1": 0.1666,
+      "recall@5": 0.4431,
+      "recall@10": 0.5717,
+      "recall@20": 0.6621,
+      "mrr@10": 0.2926,
+      "ndcg@10": 0.3558
+    }
+  },
+  "paired_vs_baseline": {
+    "fixed_256 - metadata_128": {
+      "mrr@10": {
+        "delta": -0.01358,
+        "ci95": [
+          -0.02411,
+          -0.00328
+        ],
+        "significant": true
+      },
+      "recall@10": {
+        "delta": -0.00683,
+        "ci95": [
+          -0.02228,
+          0.00822
+        ],
+        "significant": false
+      },
+      "recall@20": {
+        "delta": -0.00683,
+        "ci95": [
+          -0.02111,
+          0.00678
+        ],
+        "significant": false
+      }
+    },
+    "fixed+metadata - metadata_128": {
+      "mrr@10": {
+        "delta": -0.00571,
+        "ci95": [
+          -0.01364,
+          0.00213
+        ],
+        "significant": false
+      },
+      "recall@10": {
+        "delta": 0.0015,
+        "ci95": [
+          -0.00922,
+          0.01211
+        ],
+        "significant": false
+      },
+      "recall@20": {
+        "delta": 0.00217,
+        "ci95": [
+          -0.009,
+          0.01311
+        ],
+        "significant": false
+      }
+    },
+    "ENSEMBLE - metadata_128": {
+      "mrr@10": {
+        "delta": -0.01047,
+        "ci95": [
+          -0.01847,
+          -0.00264
+        ],
+        "significant": true
+      },
+      "recall@10": {
+        "delta": 0.00472,
+        "ci95": [
+          -0.00756,
+          0.01678
+        ],
+        "significant": false
+      },
+      "recall@20": {
+        "delta": -0.00537,
+        "ci95": [
+          -0.01733,
+          0.00644
+        ],
+        "significant": false
+      }
+    }
+  },
+  "leak_test": {
+    "per_type": [
+      {
+        "query_type": "DESCRIPTION",
+        "n_queries": 921,
+        "corpus_share": 0.5941,
+        "metadata_mrr": 0.2862,
+        "fixed_mrr": 0.2754,
+        "advantage": 0.0109,
+        "delta": 0.01089,
+        "ci95": [
+          -0.00249,
+          0.02465
+        ],
+        "significant": false
+      },
+      {
+        "query_type": "ENTITY",
+        "n_queries": 118,
+        "corpus_share": 0.0937,
+        "metadata_mrr": 0.2936,
+        "fixed_mrr": 0.2757,
+        "advantage": 0.0179,
+        "delta": 0.01789,
+        "ci95": [
+          -0.02066,
+          0.05788
+        ],
+        "significant": false
+      },
+      {
+        "query_type": "LOCATION",
+        "n_queries": 159,
+        "corpus_share": 0.0937,
+        "metadata_mrr": 0.4044,
+        "fixed_mrr": 0.3734,
+        "advantage": 0.031,
+        "delta": 0.031,
+        "ci95": [
+          -0.00407,
+          0.06702
+        ],
+        "significant": false
+      },
+      {
+        "query_type": "NUMERIC",
+        "n_queries": 265,
+        "corpus_share": 0.1917,
+        "metadata_mrr": 0.3002,
+        "fixed_mrr": 0.2925,
+        "advantage": 0.0077,
+        "delta": 0.00773,
+        "ci95": [
+          -0.01256,
+          0.02856
+        ],
+        "significant": false
+      },
+      {
+        "query_type": "PERSON",
+        "n_queries": 37,
+        "corpus_share": 0.0267,
+        "metadata_mrr": 0.3357,
+        "fixed_mrr": 0.3018,
+        "advantage": 0.0339,
+        "delta": 0.03389,
+        "ci95": [
+          0.00097,
+          0.07297
+        ],
+        "significant": true
+      }
+    ],
+    "corr_share_vs_advantage": -0.638
+  },
+  "per_language": {
+    "hin_Deva": {
+      "n_queries": 737,
+      "fixed_256 - metadata_128": {
+        "mrr@10": {
+          "delta": -0.00065,
+          "ci95": [
+            -0.01472,
+            0.01321
+          ],
+          "significant": false
+        },
+        "recall@10": {
+          "delta": 0.00791,
+          "ci95": [
+            -0.01221,
+            0.02827
+          ],
+          "significant": false
+        }
+      },
+      "fixed+metadata - metadata_128": {
+        "mrr@10": {
+          "delta": -0.00156,
+          "ci95": [
+            -0.012,
+            0.00908
+          ],
+          "significant": false
+        },
+        "recall@10": {
+          "delta": 0.00384,
+          "ci95": [
+            -0.01018,
+            0.01719
+          ],
+          "significant": false
+        }
+      },
+      "ENSEMBLE - metadata_128": {
+        "mrr@10": {
+          "delta": -0.00259,
+          "ci95": [
+            -0.0132,
+            0.00764
+          ],
+          "significant": false
+        },
+        "recall@10": {
+          "delta": 0.01787,
+          "ci95": [
+            0.00204,
+            0.03415
+          ],
+          "significant": true
+        }
+      }
+    },
+    "mar_Deva": {
+      "n_queries": 763,
+      "fixed_256 - metadata_128": {
+        "mrr@10": {
+          "delta": -0.02607,
+          "ci95": [
+            -0.04157,
+            -0.0107
+          ],
+          "significant": true
+        },
+        "recall@10": {
+          "delta": -0.02108,
+          "ci95": [
+            -0.04336,
+            0.00098
+          ],
+          "significant": false
+        }
+      },
+      "fixed+metadata - metadata_128": {
+        "mrr@10": {
+          "delta": -0.00972,
+          "ci95": [
+            -0.02132,
+            0.00198
+          ],
+          "significant": false
+        },
+        "recall@10": {
+          "delta": -0.00076,
+          "ci95": [
+            -0.01704,
+            0.01562
+          ],
+          "significant": false
+        }
+      },
+      "ENSEMBLE - metadata_128": {
+        "mrr@10": {
+          "delta": -0.01808,
+          "ci95": [
+            -0.0303,
+            -0.00643
+          ],
+          "significant": true
+        },
+        "recall@10": {
+          "delta": -0.00797,
+          "ci95": [
+            -0.02622,
+            0.0095
+          ],
+          "significant": false
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,238 @@
+{
+  "fixed_256": {
+    "n_chunks": 201298,
+    "n_queries": 1500,
+    "overall": {
+      "recall@1": 0.1722,
+      "recall@5": 0.4573,
+      "recall@10": 0.5694,
+      "recall@20": 0.6617,
+      "mrr@10": 0.2974,
+      "ndcg@10": 0.3583
+    },
+    "by_query_type": {
+      "DESCRIPTION": {
+        "recall@1": 0.1587,
+        "recall@5": 0.4204,
+        "recall@10": 0.5359,
+        "recall@20": 0.6321,
+        "mrr@10": 0.2765,
+        "ndcg@10": 0.3336
+      },
+      "ENTITY": {
+        "recall@1": 0.147,
+        "recall@5": 0.4408,
+        "recall@10": 0.5716,
+        "recall@20": 0.6512,
+        "mrr@10": 0.2886,
+        "ndcg@10": 0.3501
+      },
+      "LOCATION": {
+        "recall@1": 0.2081,
+        "recall@5": 0.6054,
+        "recall@10": 0.706,
+        "recall@20": 0.7745,
+        "mrr@10": 0.3649,
+        "ndcg@10": 0.4445
+      },
+      "NUMERIC": {
+        "recall@1": 0.203,
+        "recall@5": 0.4769,
+        "recall@10": 0.5825,
+        "recall@20": 0.6766,
+        "mrr@10": 0.3239,
+        "ndcg@10": 0.3834
+      },
+      "PERSON": {
+        "recall@1": 0.1818,
+        "recall@5": 0.6023,
+        "recall@10": 0.6705,
+        "recall@20": 0.7955,
+        "mrr@10": 0.3277,
+        "ndcg@10": 0.4084
+      }
+    },
+    "search_ms": {
+      "p50": 2.19,
+      "p70": 2.45,
+      "p100": 448.09
+    }
+  },
+  "metadata_128": {
+    "n_chunks": 241572,
+    "n_queries": 1500,
+    "overall": {
+      "recall@1": 0.1736,
+      "recall@5": 0.4522,
+      "recall@10": 0.5808,
+      "recall@20": 0.6814,
+      "mrr@10": 0.3003,
+      "ndcg@10": 0.3632
+    },
+    "by_query_type": {
+      "DESCRIPTION": {
+        "recall@1": 0.1595,
+        "recall@5": 0.4092,
+        "recall@10": 0.5393,
+        "recall@20": 0.6352,
+        "mrr@10": 0.2753,
+        "ndcg@10": 0.3335
+      },
+      "ENTITY": {
+        "recall@1": 0.1246,
+        "recall@5": 0.4184,
+        "recall@10": 0.5803,
+        "recall@20": 0.6848,
+        "mrr@10": 0.2785,
+        "ndcg@10": 0.3432
+      },
+      "LOCATION": {
+        "recall@1": 0.2248,
+        "recall@5": 0.6322,
+        "recall@10": 0.7396,
+        "recall@20": 0.806,
+        "mrr@10": 0.3885,
+        "ndcg@10": 0.4717
+      },
+      "NUMERIC": {
+        "recall@1": 0.1997,
+        "recall@5": 0.4835,
+        "recall@10": 0.6023,
+        "recall@20": 0.7409,
+        "mrr@10": 0.3255,
+        "ndcg@10": 0.3893
+      },
+      "PERSON": {
+        "recall@1": 0.25,
+        "recall@5": 0.5795,
+        "recall@10": 0.7159,
+        "recall@20": 0.75,
+        "mrr@10": 0.3882,
+        "ndcg@10": 0.4644
+      }
+    },
+    "search_ms": {
+      "p50": 2.01,
+      "p70": 2.28,
+      "p100": 11.31
+    }
+  },
+  "semantic_128": {
+    "n_chunks": 239175,
+    "n_queries": 1500,
+    "overall": {
+      "recall@1": 0.1715,
+      "recall@5": 0.448,
+      "recall@10": 0.5608,
+      "recall@20": 0.6535,
+      "mrr@10": 0.2944,
+      "ndcg@10": 0.3535
+    },
+    "by_query_type": {
+      "DESCRIPTION": {
+        "recall@1": 0.1547,
+        "recall@5": 0.4141,
+        "recall@10": 0.5288,
+        "recall@20": 0.6162,
+        "mrr@10": 0.2723,
+        "ndcg@10": 0.3283
+      },
+      "ENTITY": {
+        "recall@1": 0.147,
+        "recall@5": 0.4184,
+        "recall@10": 0.5443,
+        "recall@20": 0.6699,
+        "mrr@10": 0.2789,
+        "ndcg@10": 0.3356
+      },
+      "LOCATION": {
+        "recall@1": 0.2081,
+        "recall@5": 0.602,
+        "recall@10": 0.6792,
+        "recall@20": 0.7611,
+        "mrr@10": 0.3643,
+        "ndcg@10": 0.4385
+      },
+      "NUMERIC": {
+        "recall@1": 0.2145,
+        "recall@5": 0.4703,
+        "recall@10": 0.5924,
+        "recall@20": 0.6865,
+        "mrr@10": 0.3298,
+        "ndcg@10": 0.3889
+      },
+      "PERSON": {
+        "recall@1": 0.1591,
+        "recall@5": 0.5341,
+        "recall@10": 0.625,
+        "recall@20": 0.75,
+        "mrr@10": 0.2987,
+        "ndcg@10": 0.3758
+      }
+    },
+    "search_ms": {
+      "p50": 2.15,
+      "p70": 2.44,
+      "p100": 11.27
+    }
+  },
+  "ENSEMBLE[fixed_256+semantic_128+metadata_128]": {
+    "n_chunks": 682045,
+    "n_queries": 1500,
+    "overall": {
+      "recall@1": 0.1799,
+      "recall@5": 0.4622,
+      "recall@10": 0.5803,
+      "recall@20": 0.6669,
+      "mrr@10": 0.3056,
+      "ndcg@10": 0.367
+    },
+    "by_query_type": {
+      "DESCRIPTION": {
+        "recall@1": 0.1656,
+        "recall@5": 0.4204,
+        "recall@10": 0.5449,
+        "recall@20": 0.6252,
+        "mrr@10": 0.2823,
+        "ndcg@10": 0.3397
+      },
+      "ENTITY": {
+        "recall@1": 0.1545,
+        "recall@5": 0.4433,
+        "recall@10": 0.5642,
+        "recall@20": 0.696,
+        "mrr@10": 0.301,
+        "ndcg@10": 0.3586
+      },
+      "LOCATION": {
+        "recall@1": 0.2148,
+        "recall@5": 0.6087,
+        "recall@10": 0.7262,
+        "recall@20": 0.7758,
+        "mrr@10": 0.3793,
+        "ndcg@10": 0.4602
+      },
+      "NUMERIC": {
+        "recall@1": 0.2178,
+        "recall@5": 0.4983,
+        "recall@10": 0.6007,
+        "recall@20": 0.7079,
+        "mrr@10": 0.336,
+        "ndcg@10": 0.3971
+      },
+      "PERSON": {
+        "recall@1": 0.1591,
+        "recall@5": 0.6023,
+        "recall@10": 0.6932,
+        "recall@20": 0.75,
+        "mrr@10": 0.3225,
+        "ndcg@10": 0.4097
+      }
+    },
+    "search_ms": {
+      "p50": 6.62,
+      "p70": 7.41,
+      "p100": 112.24
+    }
+  }
+}

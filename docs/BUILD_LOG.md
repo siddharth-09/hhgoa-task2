@@ -700,6 +700,122 @@ partial                      vectors/full/fixed_256.npy  (superseded by the tran
 ```
 The pilot index still serves, so development is never blocked on the transfer.
 
+### Index imported — and the ids were colliding across languages
+The transferred `index-full.tgz` (1.3GB) unpacks to `data/index/full/` + `data/raw/` +
+`data/reports/`. Chunk counts match the build report exactly: fixed_256 201,298,
+semantic_128 239,175, metadata_128 241,572.
+
+Dense, sparse and metadata are row-aligned in all three variants. **But the ids were not
+unique:** 201,298 rows held only 101,231 distinct `chunk_id`s.
+
+```
+chunk_id '1185869:0#fx0' appears at row 0 AND row 100471
+  row 0      hin_Deva  'वैज्ञानिक दिमाग के बीच संचार की उपस्थिति मैनहट्टन परियोजना…'
+  row 100471 mar_Deva  'मॅनहॅटन प्रकल्पाच्या यशासाठी वैज्ञानिक बुद्धिमत्तेप्रमाणेच…'
+```
+
+`ingest/download.py` built `pid = f"{query_id}:{i}"`. MSMARCO-XI is a **parallel** corpus —
+every language shard carries the same query_ids — so **99,834 of 99,834 passage_ids
+collided**, same id, different text. Consequences, all silent:
+
+- `AdaptiveRetriever` fuses on `passage_id`, so a Hindi passage and its Marathi translation
+  collapse into one unit; `seen_units` then discards the second as a duplicate vote
+- `best[unit]` keeps whichever ranked first → a Hindi query can be answered in Marathi
+- in `eval/`, a Marathi passage satisfies Hindi gold labels — every metric inflated
+
+**Invisible on Day 1** because the pilot was Hindi-only. It appears the moment a second
+language is added, which is exactly what Day 2 did.
+
+Fixed at the source (`download.py` namespaces by `target_lang`; `to_documents` now groups
+by `(lang, query_id)` — it was concatenating Hindi and Marathi text into one mixed-script
+document; `eval/evaluate.py` checks the granularity marker on the last id segment).
+
+**The built index did not need rebuilding.** HNSW and BM25 are keyed by row index, not by
+id — the ids live only in `meta.pkl`. So the repair is a metadata rewrite over the
+transferred artifact and the 64 minutes of embedding stay valid. After it: chunk_ids
+201,298/239,175/241,572 all distinct, passage_ids 199,668 in every variant — matching
+`n_passages` in the pipeline report.
+
+> Measurement correction: a first pass also flagged BM25 as misaligned. It was not — the
+> count was derived from `indptr`, which is vocab size (293,785). `num_docs` is 201,298
+> and correct. Worth stating because it nearly sent a rebuild after a clean artifact.
+
+### **OPEN RISK RESOLVED — the ensemble was never the problem**
+`bench/latency.py` only ever measured a *single* index, which is why the fan-out went
+unmeasured. `bench/fastpath.py` now measures the real served path — guardrail → embed →
+retrieve → extract → guardrail — through `RAGHarness`.
+
+Full index, 300 queries, hin+mar, **in Docker** (aarch64, 3-core cap, the Oracle-shaped
+config):
+
+```
+fast_path   P50  42.1ms   P70  48.7ms   P100  245.7ms    297/300 under 200ms
+```
+
+| Stage | P50 | P90 | P99 | P100 |
+|---|---:|---:|---:|---:|
+| embed_query | 1.87 | 2.57 | 4.78 | 53.94 |
+| retrieve (all 3 indexes) | 7.83 | 10.92 | 16.18 | 60.05 |
+| **extract** | **32.02** | **51.07** | **175.55** | **236.84** |
+| **fast_path_total** | **42.12** | 63.43 | 190.50 | **245.67** |
+
+**The predicted 3 × 60ms = 220ms blowup does not occur.** The whole three-index fan-out is
+**6.9ms P50** — 2.3ms per index, not 30ms:
+
+| Index | chunks | P50 | P100 |
+|---|---:|---:|---:|
+| fixed_256 | 201,298 | 2.34 | 8.38 |
+| semantic_128 | 239,175 | 2.39 | 5.39 |
+| metadata_128 | 241,572 | 2.15 | 5.77 |
+
+The 30ms sparse figure came from the x86 Windows box; it does not reproduce on aarch64 in
+the container. So **fix #1 (parallelise the fan-out) would recover ~4.5ms** and is not
+worth doing, and **fix #3 (drop `metadata_128`) would give up ~1% R@10 to save 2ms** — a
+bad trade. Both were ranked off a number measured on the wrong machine.
+
+> The lesson repeats Day 1's: an ablation over one component does not predict the system.
+> The risk was real to *raise* — it just turned out to be the wrong stage. Nothing was
+> lost by raising it, and the fix list would have wasted a day.
+
+**The real tail is `extract`** — P99 175ms, P100 237ms, and it alone accounts for all 3
+queries over budget. That is where the remaining work belongs, not in retrieval.
+
+### Quality at full scale — the ensemble's case is now much weaker
+1,500 queries, hin+mar, post-repair, in Docker:
+
+| Strategy | Chunks | MRR@10 | nDCG@10 | R@10 | R@20 | search p50 |
+|---|---:|---:|---:|---:|---:|---:|
+| fixed_256 | 201,298 | 0.2974 | 0.3583 | 0.5694 | 0.6617 | 2.19ms |
+| **metadata_128** | 241,572 | 0.3003 | 0.3632 | **0.5808** | **0.6814** | 2.01ms |
+| semantic_128 | 239,175 | 0.2944 | 0.3535 | 0.5608 | 0.6535 | 2.15ms |
+| ENSEMBLE (all 3) | 682,045 | **0.3056** | **0.3670** | 0.5803 | 0.6669 | 6.62ms |
+
+**The ensemble no longer wins on recall.** It takes MRR@10 (+1.8% over `metadata_128`) and
+nDCG, but `metadata_128` alone matches it at R@10 and **beats it at R@20** (0.6814 vs
+0.6669) — while using **2.8x fewer chunks and a third of the search time**. At pilot scale
+the ensemble's justification was +1.0% R@10; at full scale that gain is gone.
+
+`DEFAULT_ENSEMBLE` was chosen on 1,200 Hindi-only queries over ~75k chunks. This is 1,500
+bilingual queries over 682k. The serving choice should be re-decided on these numbers, not
+the pilot's — `metadata_128` alone is now a serious candidate, and it is the cheapest of
+the three to hold in RAM on a shared box.
+
+Metrics are lower than the pilot's (MRR 0.4069 → 0.3056) and that is expected, not a
+regression: 9x the corpus means 9x the distractors, and the task is now bilingual. The two
+runs are not comparable. Note the pilot numbers were *not* inflated by the id collision —
+it was Hindi-only, so nothing collided. This run would have been.
+
+> Also inverted: `metadata_128` is now the best single index, having been the *worst* in
+> the Day 1 pilot. That is the second time this strategy's ranking has flipped when a
+> defect was fixed underneath it.
+
+> Host-only finding, recorded so it does not resurface: run outside Docker on the Mac, the
+> same benchmark reports **214ms P50** — CoreML claims only 542 of 889 nodes of the int8
+> graph and splits it into 74 partitions, so `embed_query` goes 1.9ms → 20.9ms and
+> `extract` (which embeds candidate sentences) 32ms → 180ms. `ORT_PROVIDERS=CPUExecutionProvider`
+> restores 44ms. Irrelevant to the Linux serving target, which has no CoreML — but it
+> would have made a host-run demo look 5x slower than the product is.
+
 ### Repo
 First commit `ea51298`, 32 files, no secrets (`.env` gitignored, scan clean).
 **Not yet pushed** — `gh` is authenticated as `siddharth-09`; needs
@@ -707,10 +823,191 @@ First commit `ea51298`, 32 files, no secrets (`.env` gitignored, scan clean).
 
 ---
 
+## 2026-08-14 — Day 2 (cont.): optimisation pass on the new evidence
+
+All runs in Docker (aarch64, 3-core cap), commit `cdf0bf4`, seed 7, same 1,500-query
+bilingual set, `int8_arm`. Nothing below is mixed with the x86 Windows numbers.
+
+### `extract`: the tail was padding, not candidate count
+`embed_sentences` is **99.5%** of the stage — 31.8ms of 32.0 at P50, 180ms of 180.2 at
+P99. What sets it is not how many sentences are embedded but how long the *longest* one
+is:
+
+```
+correlation with extract latency:  max_sentence_chars 0.8411   n_sentences 0.0166
+slowest 10%:  8.73 sentences, longest 387 chars (worst 1,279)  ->  91.6ms
+fastest 50%:  8.81 sentences, longest 152 chars                ->  25.5ms
+```
+
+Same sentence count, 3.6x the latency. The tokenizer pads a batch to its longest member,
+and `Embedder._encode` sorts by length to avoid exactly that — but the sort only pays
+across several batches, and 10 sentences is one batch of 64. So a single 1,279-char
+sentence made the other nine cost what it cost. **Cutting `MAX_EMBED` would have done
+nothing**; that lever was tuned when count still mattered.
+
+> This inverts the earlier prefilter finding rather than contradicting it. At pilot
+> scale, count *was* the cost. The lever stopped working and nobody re-measured it.
+
+### The batch-size fix, and a wrong assumption caught by its own check
+Embedding one sentence at a time removes the padding. The tuning bench asserted this must
+be answer-identical — masked mean pooling means a vector cannot depend on its batchmates —
+and then measured only ~90% identical, which forced the check:
+
+```
+same text, batched with a long sentence vs embedded alone
+  int8_arm   max|Δ| = 1.03e-02   cos 0.9981    <- NOT invariant
+  fp32       max|Δ| = 4.66e-08   cos 1.0000    <- invariant, as claimed
+```
+
+The served model is **dynamically quantised**: activation scales are computed at runtime
+from a tensor spanning the batch, so a wide pad coarsens the quantisation of every short
+sentence beside it. Pooling was never the issue.
+
+**This inverts the interpretation.** A large batch is not the accurate configuration that
+small batches deviate from — it is the degraded one. Fidelity was being scored against the
+worst config in the table. Re-scored against `batch=1`, which reproduces the standalone
+vector bitwise:
+
+| embed_batch | P50 | P95 | P99 | P100 | identical to reference |
+|---:|---:|---:|---:|---:|---:|
+| 64 | 32.33 | 66.87 | 185.37 | 227.52 | 90.7% |
+| 8 | 28.55 | 50.14 | 156.37 | 179.47 | 91.7% |
+| 4 | 26.53 | 41.61 | 97.09 | 103.95 | 91.0% |
+| 2 | 26.17 | 36.94 | 68.01 | 76.91 | 93.3% |
+| **1** | **24.14** | **34.24** | **48.58** | 81.73 | **100%** |
+
+Fastest through P99 *and* the most faithful. Batching is a throughput optimisation and
+this path has a batch of ten.
+
+### Truncation for what batching cannot fix
+batch=1 removes the amplification, not the cost of a long sentence itself (superlinear in
+length). On the single-index config that remainder was the whole tail: P99 127ms against
+P50 25ms. Capping the text *sent to the encoder* at 256 chars — the returned span and its
+citation stay whole — cuts P99 2.4x for 1 answer in 60 changed, support 0.6511 → 0.6501.
+It costs ~9ms at P50, which is the honest half of the trade: it buys tail predictability,
+not median speed.
+
+### Exhaustive ablation replaced the inherited ensemble
+All 7 subsets, 1,500 bilingual queries:
+
+| Configuration | Chunks | MRR@10 | R@10 | R@20 | search P50 | disk |
+|---|---:|---:|---:|---:|---:|---:|
+| **metadata_128** | 241,572 | **0.3030** | 0.5669 | 0.6675 | 4.32ms | **722MB** |
+| fixed_256 | 201,298 | 0.2895 | 0.5601 | 0.6607 | 4.28ms | 623MB |
+| semantic_128 | 239,175 | 0.2822 | 0.5552 | 0.6502 | 4.50ms | 705MB |
+| fixed+metadata | 442,870 | 0.2973 | 0.5684 | **0.6697** | 7.20ms | 1345MB |
+| ENSEMBLE | 682,045 | 0.2926 | **0.5717** | 0.6621 | 11.27ms | 2050MB |
+
+The ensemble "wins" R@10 by 0.0048 — and the pilot chose it on exactly this kind of
+margin. Paired bootstrap (10k resamples, same queries) says that margin is not there:
+
+```
+ENSEMBLE - metadata_128   mrr@10     -0.0105  [-0.0185, -0.0026]   significant
+ENSEMBLE - metadata_128   recall@10  +0.0047  [-0.0076, +0.0168]   not significant
+ENSEMBLE - metadata_128   recall@20  -0.0054  [-0.0173, +0.0064]   not significant
+```
+
+**Every recall difference in that table is noise.** The only real difference favours the
+single index. `DEFAULT_ENSEMBLE = ["metadata_128"]`.
+
+> The pilot's error was not the choice, it was the method: ranking configurations by
+> point estimates without a CI. A 0.005 gap over 1,200 queries was never evidence.
+
+### Why metadata_128 wins — partly a label leak
+`chunk_metadata` embeds `[type] hint | body`, and `query_type` is the dataset's label for
+the *query that owns the passage*. So a NUMERIC query's gold passages are tagged NUMERIC
+while most of the corpus is not — a label a real corpus does not carry.
+
+The two explanations predict different things. A genuine semantic effect ("how many…"
+lands near numeric-flavoured text) is roughly uniform across types; a leak scales with how
+much corpus the tag excludes. Measured:
+
+| query_type | corpus share | advantage over fixed_256 | significant |
+|---|---:|---:|---|
+| DESCRIPTION | 59.4% | +0.0109 | no |
+| NUMERIC | 19.2% | +0.0077 | no |
+| ENTITY | 9.4% | +0.0179 | no |
+| LOCATION | 9.4% | +0.0310 | no |
+| PERSON | 2.7% | +0.0339 | **yes** |
+
+Correlation between corpus share and advantage: **-0.638**. Directionally the leak
+signature, though only PERSON (n=37) is individually significant and the advantage stays
+positive even for the majority type — so it is likely both effects, not purely the leak.
+Recorded as a caveat, not a blocker: metadata_128 is never significantly *worse* than any
+alternative on any metric, and it is a third of the footprint.
+
+### Serving metadata_128 alone exposed a shipping bug
+Every extractive answer came back as:
+
+```
+[description] explanation description definition | वैज्ञानिक दिमाग के बीच संचार की…
+```
+
+`chunk_metadata` stored the hint-prefixed string as the chunk's `text`, and the extractive
+answer is drawn from stored text. The clean body was in `extra["raw_text"]`, which the
+pipeline already used to keep the hint out of BM25 — but never used for display. **The
+ensemble hid it**: `best[unit]` usually picked a `fixed_256` chunk for the same passage,
+so most answers looked clean. Shipping one index exposed it on 100% of answers.
+
+Fixed at source (`ChunkIndex.build` now takes `display_texts`; the pipeline passes the
+untagged body to both BM25 and display) and repaired in the built index — 241,572 rows,
+metadata-only rewrite, no re-embedding, since the hint belongs in the vectors and only the
+display copy was wrong.
+
+> Two separate defects this session were both invisible behind the ensemble and both
+> appeared only when something simpler was tried. Worth noting as a pattern: redundancy
+> hides bugs in the components it makes redundant.
+
+### Per-language, and why routing was rejected
+Marathi is much weaker than Hindi across every configuration (MRR 0.26 vs 0.35, R@10 0.51
+vs 0.63) — the largest quality gap in the system, and larger than any difference between
+configurations. The ensemble's only significant per-language win is Hindi R@10 (+0.0179
+[+0.0020, +0.0341]); on Marathi it is significantly *worse* on MRR (-0.0181).
+
+Language-conditional retrieval was evaluated and rejected: it must hold all three indexes
+resident, so it inherits the ensemble's memory cost — the dominant cost — while adding a
+routing decision, to buy a gain in one language.
+
+### Id audit — clean, verified independently
+```
+| index        | rows    | aligned | dup chunk_ids | cross-lang pids | id->2 texts |
+| fixed_256    | 201,298 | yes     | 0             | 0               | 0           |
+| semantic_128 | 239,175 | yes     | 0             | 0               | 0           |
+| metadata_128 | 241,572 | yes     | 0             | 0               | 0           |
+gold linkage: 21,342/21,342 (100%) resolve into the index
+```
+Duplicate *text* rows remain (0.97–2.88%) — genuine near-duplicate passages in MSMARCO,
+not an id defect. `eval/audit_ids.py` re-runs this after any ingest.
+
+### Result
+
+| | before | after (metadata_128) |
+|---|---:|---:|
+| fast path P50 | 42.12ms | **30.50ms** |
+| P70 | 48.67ms | **32.86ms** |
+| P99 | 190.50ms | **48.16ms** |
+| P100 | 245.67ms | **129.53ms** |
+| under 200ms | 297/300 | **300/300** |
+| MRR@10 | 0.2926 | **0.3030** |
+| R@10 | 0.5717 | 0.5669 (n.s.) |
+| R@20 | 0.6621 | 0.6675 (n.s.) |
+| disk | 2,050MB | **722MB** |
+| chunks | 682,045 | **241,572** |
+
 ### Open items
-- [ ] **Import the transferred index, verify alignment, benchmark the ENSEMBLE** (the open risk above)
+- [x] ~~Cut the `extract` tail~~ — P99 190 → 48ms; all four latency targets met
+- [x] ~~Re-decide the serving ensemble on full-scale numbers~~ — `metadata_128` alone
+- [x] ~~Import the transferred index, verify alignment, benchmark the ENSEMBLE~~ — done.
+      Alignment was clean; **ids were not** (cross-language collision, repaired in place).
+      Ensemble fan-out is 6.9ms, not the feared 180ms.
+- [ ] **Cut the `extract` tail** — P99 175ms / P100 237ms is now the *only* thing over
+      budget (3/300 queries). Everything else sums to ~10ms. The prefilter=10 tuning was
+      done at pilot scale; re-tune it here.
+- [ ] **Re-decide the serving ensemble on full-scale numbers** — `metadata_128` alone
+      beats the 3-index ensemble at R@20 for a third of the cost
 - [ ] `api/` + `web/` — the mic page and the "live working link"
-- [ ] Formal benchmark run on the full index for the README numbers
+- [ ] Re-run the eval on `--no-ensemble` doc variants if doc granularity is revisited
+      (`to_documents` was merging Hindi and Marathi into one document until today)
 - [ ] Push repo to GitHub (5 min, unblocks a submission requirement)
 - [ ] Deployment + domain
 - [ ] Videos, social posts (the automated screening gate)

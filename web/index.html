@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice RAG — Hindi &amp; Marathi</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c2330; --line: #2a3340;
+    --fg: #e6edf3; --muted: #8b98a5; --accent: #4c9aff; --good: #3fb950;
+    --warn: #d29922; --bad: #f85149; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 28px 20px 64px; }
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
+  h1 { font-size: 21px; margin: 0; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px; margin-top: 16px;
+  }
+  .card h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin: 0 0 12px; font-weight: 600;
+  }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  input[type=text] {
+    flex: 1; min-width: 240px; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 11px 13px; font-size: 15px;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--panel-2); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 15px; font-size: 14px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #061021; font-weight: 600; }
+  button.rec { background: var(--bad); border-color: var(--bad); color: #fff; }
+  .answer { font-size: 17px; line-height: 1.6; margin: 0; white-space: pre-wrap; }
+  .answer:lang(hi), .answer { word-break: break-word; }
+  .placeholder { color: var(--muted); font-size: 14px; }
+  .tier { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .pill {
+    font-size: 11px; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); font-family: var(--mono);
+  }
+  .pill.ok { color: var(--good); border-color: #204d2c; background: #0f2416; }
+  .pill.warn { color: var(--warn); border-color: #4d3c15; background: #241d0f; }
+  .pill.bad { color: var(--bad); border-color: #5c2220; background: #2a1210; }
+  .pill.live { color: var(--accent); border-color: #1d3f6b; background: #0f1c2e; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  td.num, th.num { text-align: right; font-family: var(--mono); }
+  tr.served td { background: #0f1c2e; }
+  .bar { height: 5px; background: var(--panel-2); border-radius: 3px; overflow: hidden; margin-top: 5px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 20px; font-family: var(--mono); letter-spacing: -.02em; }
+  .stat span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .src { border-left: 2px solid var(--line); padding: 2px 0 2px 12px; margin: 10px 0; font-size: 13.5px; color: #c9d4df; }
+  .src .meta { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .scroll { overflow-x: auto; }
+  .err { color: var(--bad); font-size: 13px; font-family: var(--mono); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 10px; }
+  .ex { font-size: 12.5px; color: var(--accent); cursor: pointer; border: 0; background: none; padding: 2px 0; text-align: left; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Voice RAG — Hindi &amp; Marathi</h1>
+  <span class="sub" id="health">connecting…</span>
+</header>
+<p class="sub" style="margin:2px 0 0">
+  Ask by voice or text. A grounded answer is extracted in under 200ms; the LLM-polished
+  version arrives after and can only replace it, never remove it.
+</p>
+
+<div class="card">
+  <div class="row">
+    <input type="text" id="q" placeholder="ताजमहल किसने बनवाया था?" autocomplete="off">
+    <button class="primary" id="askBtn">Ask</button>
+    <button id="micBtn">🎤 Speak</button>
+  </div>
+  <div class="row" style="margin-top:10px; gap:14px">
+    <button class="ex" data-q="मैनहट्टन परियोजना की सफलता का तुरंत क्या प्रभाव पड़ा?">try: Manhattan Project (hi)</button>
+    <button class="ex" data-q="सामाजिक सुरक्षा विकलांगता के प्रकार क्या हैं?">try: social security (hi)</button>
+    <button class="ex" data-q="मेरे बैंक खाते का पासवर्ड क्या है?">try: blocked query</button>
+  </div>
+  <div id="micState" class="note"></div>
+</div>
+
+<div class="card">
+  <h2>Answer</h2>
+  <div class="tier" id="tier"></div>
+  <p class="answer placeholder" id="answer">Ask something to begin.</p>
+  <div id="sources"></div>
+</div>
+
+<div class="card">
+  <h2>Latency — this query</h2>
+  <div id="stages"><p class="placeholder">No query yet.</p></div>
+  <div class="note">
+    The 200ms budget is measured from the transcript, per the task wording
+    (“chunking + vector DB retrieval + everything through to final output”).
+    Speech-to-text and LLM generation are reported separately.
+  </div>
+</div>
+
+<div class="card">
+  <h2>Latency analytics — P50 / P70 / P100</h2>
+  <div class="row" style="margin-bottom:12px">
+    <button id="benchBtn">Run 100-query benchmark</button>
+    <span class="sub" id="benchState">Session stats update as you ask.</span>
+  </div>
+  <div class="grid" id="percentiles"></div>
+  <div id="benchStages" class="scroll" style="margin-top:12px"></div>
+</div>
+
+<div class="card">
+  <h2>Chunking strategies — same question, every index</h2>
+  <div class="row" style="margin-bottom:12px">
+    <button id="cmpBtn">Compare strategies</button>
+    <span class="sub" id="cmpState">Runs the current question through each chunking strategy.</span>
+  </div>
+  <div id="compare" class="scroll"></div>
+</div>
+
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const api = (p, o) => fetch(p, o).then(async r => {
+  if (!r.ok) throw new Error((await r.text()).slice(0, 300));
+  return r.json();
+});
+const esc = s => (s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const ms = v => `${(+v).toFixed(1)}ms`;
+
+let sessionTimes = [];
+
+/* ---------- health ---------- */
+api('/health').then(h => {
+  $('#health').textContent =
+    `${h.total_chunks.toLocaleString()} chunks · serving ${h.serving.join('+')} · ` +
+    `${h.embedder_variant}${h.stt_configured ? '' : ' · mic disabled (no STT key)'}`;
+  if (!h.stt_configured) { $('#micBtn').disabled = true; }
+}).catch(e => { $('#health').textContent = 'server not ready'; });
+
+/* ---------- answering ---------- */
+function renderAnswer(d, tier) {
+  const a = $('#answer');
+  a.classList.remove('placeholder');
+  a.textContent = d.answer || '(no answer)';
+
+  const pills = [];
+  const within = d.fast_path_ms < 200;
+  pills.push(`<span class="pill ${within ? 'ok' : 'bad'}">fast path ${ms(d.fast_path_ms)} / 200ms</span>`);
+  pills.push(`<span class="pill ${tier === 'generated' ? 'live' : ''}">${tier}</span>`);
+  if (d.support != null) pills.push(`<span class="pill">support ${d.support.toFixed(3)}</span>`);
+  if (d.grounding != null) pills.push(`<span class="pill">grounding ${d.grounding.toFixed(3)}</span>`);
+  if (d.decision && d.decision !== 'allow')
+    pills.push(`<span class="pill warn">${esc(d.decision)}${d.reason ? ' — ' + esc(d.reason) : ''}</span>`);
+  if (d.stt_ms) pills.push(`<span class="pill">STT ${ms(d.stt_ms)} (outside budget)</span>`);
+  if (d.llm_error) pills.push(`<span class="pill bad">LLM: ${esc(d.llm_error.slice(0, 60))}</span>`);
+  $('#tier').innerHTML = pills.join(' ');
+
+  $('#sources').innerHTML = (d.sources || []).length
+    ? '<details style="margin-top:14px"><summary>' + d.sources.length + ' retrieved sources</summary>' +
+      d.sources.map((s, i) => `<div class="src">[${i + 1}] ${esc(s.text.slice(0, 300))}
+        <div class="meta">${esc(s.unit_id)} · score ${s.score}
+        ${Object.keys(s.contributors || {}).length ? ' · via ' + esc(Object.keys(s.contributors).join(', ')) : ''}</div></div>`).join('') +
+      '</details>'
+    : '';
+
+  renderStages(d);
+}
+
+function renderStages(d) {
+  const t = d.timings_ms || {};
+  const entries = Object.entries(t);
+  if (!entries.length) return;
+  const max = Math.max(...entries.map(([, v]) => v), 1);
+  $('#stages').innerHTML = `<table><thead><tr><th>Stage</th><th class="num">ms</th><th style="width:45%"></th></tr></thead><tbody>` +
+    entries.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${(+v).toFixed(2)}</td>
+      <td><div class="bar"><i style="width:${Math.max(1, v / max * 100)}%"></i></div></td></tr>`).join('') +
+    `<tr><td><b>fast path total</b></td><td class="num"><b>${(+d.fast_path_ms).toFixed(2)}</b></td>
+      <td class="sub">${d.total_ms > d.fast_path_ms ? 'full incl. generation ' + ms(d.total_ms) : ''}</td></tr>` +
+    `</tbody></table>`;
+}
+
+function pushSession(v) {
+  sessionTimes.push(v);
+  const s = [...sessionTimes].sort((a, b) => a - b);
+  const q = p => s[Math.min(s.length - 1, Math.floor(p / 100 * s.length))];
+  renderPercentiles({ p50: q(50), p70: q(70), p100: s[s.length - 1] },
+    `session · ${s.length} quer${s.length === 1 ? 'y' : 'ies'}`);
+}
+
+function renderPercentiles(p, label) {
+  $('#percentiles').innerHTML = ['p50', 'p70', 'p90', 'p99', 'p100']
+    .filter(k => p[k] != null)
+    .map(k => `<div class="stat"><span>${k}</span><b style="color:${p[k] < 200 ? 'var(--good)' : 'var(--bad)'}">${(+p[k]).toFixed(1)}<small style="font-size:12px">ms</small></b></div>`)
+    .join('');
+  $('#benchState').textContent = label;
+}
+
+async function ask(question) {
+  if (!question.trim()) return;
+  $('#askBtn').disabled = true;
+  $('#answer').textContent = 'retrieving…';
+  $('#answer').classList.add('placeholder');
+  try {
+    // Tier 1 — extractive, this is the number the budget is measured against.
+    const fast = await api('/ask', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, generate: false })
+    });
+    renderAnswer(fast, fast.answer_source || 'extractive');
+    pushSession(fast.fast_path_ms);
+
+    // Tier 2 — LLM polish. Can only replace the answer, never remove it.
+    if (fast.decision === 'allow') {
+      $('#tier').insertAdjacentHTML('beforeend', ' <span class="pill live" id="genPend">polishing…</span>');
+      try {
+        const full = await api('/ask', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question, generate: true })
+        });
+        renderAnswer(full, full.answer_source);
+      } catch (e) {
+        document.getElementById('genPend')?.replaceWith();
+      }
+    }
+  } catch (e) {
+    $('#answer').innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  } finally {
+    $('#askBtn').disabled = false;
+  }
+}
+
+$('#askBtn').onclick = () => ask($('#q').value);
+$('#q').addEventListener('keydown', e => { if (e.key === 'Enter') ask($('#q').value); });
+document.querySelectorAll('.ex').forEach(b => b.onclick = () => { $('#q').value = b.dataset.q; ask(b.dataset.q); });
+
+/* ---------- microphone ----------
+   Sarvam takes wav/mp3; MediaRecorder gives webm/opus, so the blob is decoded
+   and re-encoded as 16kHz mono PCM WAV in the browser. Doing it client-side
+   keeps ffmpeg off the server and matches Sarvam's recommended input. */
+let recorder = null, chunks = [];
+
+function encodeWav(samples, rate) {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); str(8, 'WAVE');
+  str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, samples.length * 2, true);
+  let o = 44;
+  for (let i = 0; i < samples.length; i++, o += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+async function toWav(blob) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+  const rate = 16000;
+  const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * rate), rate);
+  const src = off.createBufferSource();
+  src.buffer = decoded; src.connect(off.destination); src.start();
+  const out = await off.startRendering();
+  ctx.close();
+  return encodeWav(out.getChannelData(0), rate);
+}
+
+$('#micBtn').onclick = async () => {
+  if (recorder && recorder.state === 'recording') { recorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      $('#micBtn').classList.remove('rec');
+      $('#micBtn').textContent = '🎤 Speak';
+      $('#micState').textContent = 'transcribing…';
+      try {
+        const wav = await toWav(new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' }));
+        const fd = new FormData();
+        fd.append('audio', wav, 'question.wav');
+        fd.append('generate', 'true');
+        const d = await api('/voice', { method: 'POST', body: fd });
+        if (!d.stt_ok) { $('#micState').innerHTML = `<span class="err">STT: ${esc(d.stt_error)}</span>`; return; }
+        $('#q').value = d.transcript;
+        $('#micState').textContent = `heard: “${d.transcript}” · STT ${ms(d.stt_ms)} · end-to-end ${ms(d.end_to_end_ms)}`;
+        renderAnswer(d, d.answer_source);
+        pushSession(d.fast_path_ms);
+      } catch (e) {
+        $('#micState').innerHTML = `<span class="err">${esc(e.message)}</span>`;
+      }
+    };
+    recorder.start();
+    $('#micBtn').classList.add('rec');
+    $('#micBtn').textContent = '⏹ Stop';
+    $('#micState').textContent = 'recording — click stop when done (30s max)';
+    setTimeout(() => { if (recorder?.state === 'recording') recorder.stop(); }, 30000);
+  } catch (e) {
+    $('#micState').innerHTML = `<span class="err">microphone blocked: ${esc(e.message)}</span>`;
+  }
+};
+
+/* ---------- benchmark ---------- */
+$('#benchBtn').onclick = async () => {
+  const b = $('#benchBtn');
+  b.disabled = true; $('#benchState').textContent = 'running 100 queries…';
+  try {
+    const d = await api('/benchmark?n=100');
+    renderPercentiles(d.fast_path_ms,
+      `${d.n_queries} real corpus queries · ${d.within_budget}/${d.n_queries} under ${d.budget_ms}ms · serving ${d.serving.join('+')}`);
+    const st = d.stages_ms || {};
+    $('#benchStages').innerHTML = `<table><thead><tr><th>Stage</th>
+      <th class="num">P50</th><th class="num">P70</th><th class="num">P90</th>
+      <th class="num">P99</th><th class="num">P100</th></tr></thead><tbody>` +
+      Object.entries(st).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v.p50}</td>
+        <td class="num">${v.p70}</td><td class="num">${v.p90}</td><td class="num">${v.p99}</td>
+        <td class="num">${v.p100}</td></tr>`).join('') +
+      `<tr class="served"><td><b>fast path total</b></td>
+        <td class="num"><b>${d.fast_path_ms.p50}</b></td><td class="num"><b>${d.fast_path_ms.p70}</b></td>
+        <td class="num">${d.fast_path_ms.p90}</td><td class="num">${d.fast_path_ms.p99}</td>
+        <td class="num"><b>${d.fast_path_ms.p100}</b></td></tr></tbody></table>`;
+  } catch (e) {
+    $('#benchState').innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  } finally { b.disabled = false; }
+};
+
+/* ---------- strategy comparison ---------- */
+$('#cmpBtn').onclick = async () => {
+  const question = $('#q').value.trim();
+  if (!question) { $('#cmpState').textContent = 'Ask something first.'; return; }
+  const b = $('#cmpBtn');
+  b.disabled = true; $('#cmpState').textContent = 'running every strategy…';
+  try {
+    const d = await api('/compare', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question })
+    });
+    $('#cmpState').textContent = d.agreement;
+    $('#compare').innerHTML = `<table><thead><tr><th>Strategy</th><th class="num">chunks</th>
+      <th class="num">search</th><th class="num">extract</th><th class="num">support</th>
+      <th>top answer</th></tr></thead><tbody>` +
+      d.configs.map(c => `<tr class="${c.is_served ? 'served' : ''}">
+        <td>${esc(c.config)}${c.is_served ? ' <span class="pill live">served</span>' : ''}</td>
+        <td class="num">${c.chunks.toLocaleString()}</td>
+        <td class="num">${c.search_ms}</td><td class="num">${c.extract_ms}</td>
+        <td class="num">${c.support}</td>
+        <td style="font-size:12.5px">${esc((c.answer || '').slice(0, 150))}</td></tr>`).join('') +
+      `</tbody></table>
+      <div class="note">Every strategy is queried live over the same question. The served
+      configuration is highlighted — it was chosen by an exhaustive ablation over all
+      subsets with paired confidence intervals, not by picking the biggest number.</div>`;
+  } catch (e) {
+    $('#cmpState').innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  } finally { b.disabled = false; }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+{
+  "per_index": [
+    {
+      "index": "fixed_256",
+      "n_rows": 201298,
+      "n_hnsw": 201298,
+      "n_bm25": 201298,
+      "structural_aligned": true,
+      "duplicate_chunk_ids": 0,
+      "passage_ids_spanning_multiple_langs": 0,
+      "chunk_id_text_collisions": 0,
+      "duplicate_text_rows": 1959,
+      "duplicate_text_pct": 0.97,
+      "clean": true
+    },
+    {
+      "index": "semantic_128",
+      "n_rows": 239175,
+      "n_hnsw": 239175,
+      "n_bm25": 239175,
+      "structural_aligned": true,
+      "duplicate_chunk_ids": 0,
+      "passage_ids_spanning_multiple_langs": 0,
+      "chunk_id_text_collisions": 0,
+      "duplicate_text_rows": 6620,
+      "duplicate_text_pct": 2.77,
+      "clean": true
+    },
+    {
+      "index": "metadata_128",
+      "n_rows": 241572,
+      "n_hnsw": 241572,
+      "n_bm25": 241572,
+      "structural_aligned": true,
+      "duplicate_chunk_ids": 0,
+      "passage_ids_spanning_multiple_langs": 0,
+      "chunk_id_text_collisions": 0,
+      "duplicate_text_rows": 6969,
+      "duplicate_text_pct": 2.88,
+      "clean": true
+    }
+  ],
+  "gold": {
+    "gold_ids_total": 21342,
+    "gold_ids_resolvable": 21342,
+    "gold_ids_missing": 0,
+    "resolvable_pct": 100.0,
+    "queries_with_no_gold": 0
+  },
+  "clean": true
+}

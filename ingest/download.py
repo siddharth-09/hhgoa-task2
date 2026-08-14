@@ -247,8 +247,13 @@ def extract(
             for i, (eng, trans, is_sel) in enumerate(
                 zip(p["English_passages"], p["Translated_passages"], selected, strict=False)
             ):
-                # English text is shared across language shards -> stable dedup key.
-                pid = f"{row['query_id']}:{i}"
+                # MSMARCO-XI is a *parallel* corpus: every language shard carries the
+                # same query_ids, so the id must be namespaced by language. Without the
+                # prefix, a Hindi passage and its Marathi translation share an id while
+                # holding different text -- which collapses them into one unit in
+                # AdaptiveRetriever's fusion and lets a Marathi passage satisfy Hindi
+                # gold labels in eval. Invisible on a single-language pilot.
+                pid = f"{row['target_lang']}:{row['query_id']}:{i}"
                 if pid not in seen_passages:
                     seen_passages.add(pid)
                     passages.append(

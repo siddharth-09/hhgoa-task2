@@ -61,6 +61,31 @@ services:
       - ORT_THREADS=3
     restart: "no"
 
+  # Latency benchmark against an already-built index.
+  # Run with: docker compose run --rm bench
+  #
+  # Bind-mounts the host ./data rather than the task2-data volume: the full index
+  # was built on another machine and transferred as a tarball, so it lives on the
+  # host filesystem. The index is architecture-independent; only the *timings*
+  # belong to the machine that produces them, which is the whole reason this runs
+  # in the container rather than on the host.
+  bench:
+    build: .
+    image: hhgoa-task2:latest
+    <<: *limits
+    command: ["python", "-m", "bench.fastpath", "--tag", "full", "--n", "300"]
+    volumes:
+      - ./data:/data
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - DATA_ROOT=/data
+      - E5_VARIANT=int8_arm
+      - OMP_NUM_THREADS=3
+      - ORT_THREADS=3
+    restart: "no"
+
   api:
     build: .
     image: hhgoa-task2:latest
@@ -68,7 +93,9 @@ services:
     ports:
       - "127.0.0.1:8000:8000"   # loopback only; front with nginx/TLS before exposing
     volumes:
-      - task2-data:/data
+      # Same bind mount as `bench`: the full index was built elsewhere and
+      # transferred, so it lives on the host rather than in the named volume.
+      - ./data:/data
       # Bedrock uses the AWS credential chain; read-only so the container
       # can never modify the host's credentials.
       - ${HOME}/.aws:/root/.aws:ro
@@ -76,8 +103,15 @@ services:
       - path: .env
         required: false
     environment:
+      - DATA_ROOT=/data
       - INDEX_PATH=/data/index
+      - INDEX_TAG=full
       - E5_VARIANT=int8_arm
+      - ORT_THREADS=3
+      # Must match the port mapping and the healthcheck below. .env sets
+      # PORT=7860 for Hugging Face Spaces, which would otherwise leave the
+      # container listening somewhere the mapping does not reach.
+      - PORT=8000
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s

@@ -1,0 +1,20 @@
+{
+  "tag": "full",
+  "langs": [
+    "hin",
+    "mar"
+  ],
+  "max_queries": 10000,
+  "n_passages": 199668,
+  "embedder_variant": "fp32",
+  "stage_seconds": {
+    "load embedder": 4.71,
+    "load passages": 5.6,
+    "embed:semantic_128": 1510.38,
+    "embed:metadata_128": 1534.27,
+    "index:fixed_256": 127.14,
+    "index:semantic_128": 287.29,
+    "index:metadata_128": 306.52,
+    "TOTAL": 3830.22
+  }
+}

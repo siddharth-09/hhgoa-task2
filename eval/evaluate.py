@@ -54,7 +54,9 @@ def covered_gold(hit, gold: set[str], signatures: dict[str, str]) -> set[str]:
     contains, checked against a normalised prefix signature. A chunk holding
     half the answer is correctly not credited with it.
     """
-    if not hit.passage_id.startswith("doc"):
+    # Ids are language-namespaced ("hin_Deva:1185869:0", "hin_Deva:doc1185869"),
+    # so the granularity marker is the last segment, not the start of the string.
+    if not hit.passage_id.rpartition(":")[2].startswith("doc"):
         return {hit.passage_id} & gold
     text = _norm(hit.text)
     return {g for g in gold if (sig := signatures.get(g)) and sig in text}

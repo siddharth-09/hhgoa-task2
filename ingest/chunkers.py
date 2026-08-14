@@ -310,14 +310,18 @@ def to_documents(passages: Iterable[Passage]) -> Iterator[Passage]:
     query_id reconstructs a document-sized unit (~2000+ tokens), which is the
     setting real RAG chunking operates in and where strategies actually diverge.
     """
-    groups: dict[int, list[Passage]] = {}
+    # Grouped by (lang, query_id), not query_id alone: the corpus is parallel, so
+    # every language shard repeats the same query_ids. Grouping on the id alone
+    # would concatenate a Hindi passage and its Marathi translation into a single
+    # mixed-script document.
+    groups: dict[tuple[str, int], list[Passage]] = {}
     for p in passages:
-        groups.setdefault(p.query_id, []).append(p)
+        groups.setdefault((p.lang, p.query_id), []).append(p)
 
-    for qid, ps in groups.items():
+    for (lang, qid), ps in groups.items():
         first = ps[0]
         yield Passage(
-            passage_id=f"doc{qid}",
+            passage_id=f"{lang}:doc{qid}",
             query_id=qid,
             text=" ".join(p.text for p in ps if p.text and p.text.strip()),
             lang=first.lang,

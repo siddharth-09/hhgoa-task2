@@ -4,6 +4,14 @@ __pycache__/
 .env
 data/raw/
 data/index/
+data/chunks/
+data/vectors/
+# Downloaded ONNX weights + tokenizer (hundreds of MB, refetched on demand).
+data/hf_cache/
+# data/reports/ is deliberately NOT ignored -- the measured latency and eval
+# numbers are the evidence behind the README and are small (~160KB).
+# Transferred index artifact — 1.3GB, rebuilt by ingest/pipeline.py
+*.tgz
 *.parquet
 *.onnx
 .DS_Store

@@ -1,20 +1,26 @@
 """Adaptive multi-index retriever: query several chunkings at once, fuse the ranks.
 
-Motivation is empirical, not aesthetic. The variant sweep found no single
-chunking significantly better than another at passage granularity -- but it did
-find the granularities fail in *opposite directions*:
+The mechanism is rank fusion over any number of chunking strategies. How many to
+actually serve is a separate, measured question -- and the answer changed once the
+corpus reached full scale.
+
+The pilot found the granularities failing in *opposite directions*, which is the
+classic condition for fusion to help:
 
     doc_fixed_256   R@1 0.2688   R@10 0.3671   <- best precision, worst coverage
     fixed_256       R@1 0.1871   R@10 0.6763   <- worst precision, best coverage
 
-Diverse retrievers surfacing different candidates is exactly the condition under
-which rank fusion helps. So rather than choosing one chunking (and rather than
-making the user choose), every query hits all of them and the ranks are fused.
+At 682k chunks over two languages that no longer holds: an exhaustive subset
+ablation with paired confidence intervals found every recall difference between
+configurations to be inside the noise, and the three-index ensemble significantly
+*behind* a single index on MRR. DEFAULT_ENSEMBLE below carries the numbers and
+the reasoning. The fan-out machinery stays because the corpus will grow and the
+question should be re-asked, not because three indexes are currently earning
+their memory.
 
-Each index answers in ~1ms, so a four-index fan-out costs ~4ms against a 200ms
-budget. The provenance of each result is preserved, so the UI can show which
-chunking strategies actually contributed to a given answer -- the multi-strategy
-work becomes visible in the product rather than only in the README.
+Provenance of each result is preserved either way, so the UI can show which
+chunkings contributed to an answer -- with one index that is a constant, and the
+panel is worth keeping only while more than one is served.
 
 Fusion happens at *unit* granularity (parent passage or document), not chunk id,
 because different chunkings produce different chunk ids for the same underlying
@@ -32,26 +38,48 @@ import numpy as np
 
 from core.index import ChunkIndex, Hit
 
-# Chosen by ablation (eval/ablate.py, 1200 labelled queries), re-run after the
-# Devanagari tokenisation fix in core/text.py:
+# Chosen by exhaustive ablation over all 7 subsets at full scale (eval/ablate_full.py,
+# 1,500 bilingual queries, 682k chunks), with paired bootstrap CIs on the deltas
+# (eval/significance.py, 10k resamples). Both supersede the 1,200-query Hindi-only
+# pilot that picked the three-index ensemble.
 #
-#   fixed_256 + semantic_128                   MRR 0.4065  nDCG 0.4883  R@10 0.7678  2.13ms
-#   + metadata_128                             MRR 0.4069  nDCG 0.4904  R@10 0.7757  3.16ms  <-
-#   + metadata_128 + doc_fixed_256             MRR 0.4069  nDCG 0.4904  R@10 0.7757  3.96ms
+#   config                 chunks   MRR@10   R@10     R@20     search P50   disk
+#   metadata_128          241,572   0.3030   0.5669   0.6675      4.32ms    722MB  <-
+#   fixed_256             201,298   0.2895   0.5601   0.6607      4.28ms    623MB
+#   fixed+metadata        442,870   0.2973   0.5684   0.6697      7.20ms   1345MB
+#   ENSEMBLE (all three)  682,045   0.2926   0.5717   0.6621     11.27ms   2050MB
 #
-# metadata_128 earns its place on recall (+1.0% R@10). It did *not* before the
-# tokenizer fix -- it appeared to hurt, which was an artifact of BM25 indexing
-# consonant fragments rather than a property of the strategy. Worth remembering
-# that a broken component can invert an ablation's conclusion.
+# The ensemble appears to win R@10 and the pilot chose it on exactly that kind of
+# margin. Paired bootstrap says otherwise:
 #
-# doc_fixed_256 still contributes nothing: identical metrics to four decimals
-# while filling 19.3% of returned slots with passages that are never relevant.
-# It displaces better candidates and costs 6k chunks of RAM to do it.
+#   ENSEMBLE - metadata_128   mrr@10     -0.0105  [-0.0185, -0.0026]  significant
+#   ENSEMBLE - metadata_128   recall@10  +0.0047  [-0.0076, +0.0168]  not significant
+#   ENSEMBLE - metadata_128   recall@20  -0.0054  [-0.0173, +0.0064]  not significant
 #
-# Latency is not the constraint here (3.16ms of a 200ms budget). Memory is: three
-# passage indexes is ~1.5x the resident set of two, which matters at full scale.
-# If the serving box is tight, fixed_256 + semantic_128 gives up ~1% R@10.
-DEFAULT_ENSEMBLE = ["fixed_256", "semantic_128", "metadata_128"]
+# So every recall difference in that table is noise, and the one real difference
+# favours the single index. Adding two indexes buys nothing measurable while
+# costing 2.8x the memory and 2.6x the search time.
+#
+# Caveat worth carrying: metadata_128's edge is partly an evaluation artifact.
+# chunk_metadata embeds the passage's `query_type`, which the dataset derives from
+# the query that owns the passage -- so gold passages carry the asking query's
+# type while most of the corpus does not. Its advantage over fixed_256 scales
+# inversely with how common the type is (corpus share vs advantage correlates
+# -0.638; PERSON at 2.7% of the corpus gains +0.0339, DESCRIPTION at 59.4% gains
+# +0.0109 and not significantly). A corpus without those labels would see less of
+# this. It is still the right ship here -- it is never significantly *worse* than
+# any alternative on any metric, and it is a third of the footprint.
+#
+# Per language, the ensemble's only significant win is Hindi R@10 (+0.0179
+# [+0.0020, +0.0341]); on Marathi it is significantly *worse* on MRR (-0.0181).
+# Routing by language was considered and rejected: it would have to hold all three
+# indexes resident, so it inherits the ensemble's memory cost -- the dominant cost
+# here -- while adding a routing decision, to recover a gain in one language.
+DEFAULT_ENSEMBLE = ["metadata_128"]
+
+# The full set, kept for benchmarking and for `--ensemble` overrides. Nothing here
+# is deleted: the ablation is meant to be re-runnable when the corpus grows.
+FULL_ENSEMBLE = ["fixed_256", "semantic_128", "metadata_128"]
 
 
 @dataclass(slots=True)
