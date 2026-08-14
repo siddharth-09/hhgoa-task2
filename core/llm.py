@@ -36,7 +36,10 @@ Rules:
 - Answer in the SAME language AND THE SAME SCRIPT as the question.
   A Devanagari question gets a Devanagari answer. Never mix scripts: write ने, not نے.
   Prefer wording that appears in the context over your own paraphrase.
-- Be concise: one or two sentences.
+- Answer in a COMPLETE sentence that restates what was asked, not a bare fragment.
+  For "भारत की राजधानी क्या है?" answer "भारत की राजधानी नई दिल्ली है।", not "नई दिल्ली".
+  A spoken answer has no question on screen beside it, so a fragment loses its meaning.
+- Keep it to one or two sentences.
 - Cite the passage numbers you used in "citations".
 
 Return ONLY a JSON object, no markdown fence:
@@ -137,6 +140,19 @@ class LLMClient:
             self.model = model or os.getenv("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct")
             self.api_key = os.getenv("NVIDIA_API_KEY", "")
             self.base_url = "https://integrate.api.nvidia.com/v1"
+        elif self.provider == "groq":
+            # Also OpenAI-dialect. Worth having in the chain for a reason the
+            # others do not cover: Groq runs on LPUs and returns in a few hundred
+            # ms, so it degrades the *quality* tier far less than a slower
+            # fallback would. Free tier is quota-limited per minute and per day
+            # (30 req/min on the models we use), which is exactly what the
+            # cooldown logic in LLMChain exists to handle.
+            #
+            # Default is llama-3.3-70b-versatile: of the free Groq models it has
+            # the strongest Devanagari output, and this corpus is Hindi/Marathi.
+            self.model = model or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+            self.api_key = os.getenv("GROQ_API_KEY", "")
+            self.base_url = "https://api.groq.com/openai/v1"
         elif self.provider == "bedrock":
             # Bedrock authenticates with the ambient AWS credential chain rather
             # than an API key, so `configured` is decided by boto3 finding
@@ -182,7 +198,7 @@ class LLMClient:
         return resp.text or ""
 
     def _openai_compatible(self, prompt: str, max_tokens: int) -> str:
-        """Shared transport for every OpenAI-dialect endpoint (OpenRouter, NVIDIA NIM).
+        """Shared transport for every OpenAI-dialect endpoint (OpenRouter, NVIDIA NIM, Groq).
 
         Only base_url and the key differ between them, so one method covers both
         and any future provider that speaks the same protocol. httpx rather than
@@ -212,8 +228,9 @@ class LLMClient:
             "temperature": 0.0,
         }
         # Not every NIM model implements response_format; the prompt already
-        # demands JSON and _parse() tolerates prose around it.
-        if self.provider == "openrouter":
+        # demands JSON and _parse() tolerates prose around it. OpenRouter and
+        # Groq both honour it, so ask for JSON where it is supported.
+        if self.provider in ("openrouter", "groq"):
             payload["response_format"] = {"type": "json_object"}
 
         resp = self._client.post(
@@ -303,6 +320,7 @@ class LLMClient:
             "gemini": self._gemini,
             "openrouter": self._openai_compatible,
             "nvidia": self._openai_compatible,
+            "groq": self._openai_compatible,
             "bedrock": self._bedrock,
             "anthropic": self._anthropic,
         }[self.provider]
@@ -414,11 +432,22 @@ class LLMChain:
         keys a given deployment actually has.
         """
         chain = [LLMClient()]
+        # Ordered by measurement (eval/compare_llms.py), and spanning vendors:
+        # a same-vendor fallback shares the quota that just failed.
+        #
+        #   groq   llama-3.3-70b-versatile   219-420ms  primary, full sentences
+        #   gemini gemini-flash-lite-latest  962-1836ms different vendor
+        #   groq   openai/gpt-oss-20b        672-687ms  different model family
+        #   openrouter gemma-4-26b:free      6.7-9.0s   slow, but a 4th vendor
+        #
+        # Dropped after measuring: qwen3.6-27b (HTTP 400 on Marathi) and
+        # nvidia/muse-glimmer-30b (empty response on Marathi). Half this corpus is
+        # Marathi, so a model that fails on it is not a fallback.
         spec = os.getenv(
             "LLM_FALLBACK_CHAIN",
-            "openrouter:google/gemma-4-31b-it:free,"
-            "openrouter:google/gemma-4-26b-a4b-it:free,"
-            "nvidia:meta/muse-glimmer-30b",
+            "gemini:gemini-flash-lite-latest,"
+            "groq:openai/gpt-oss-20b,"
+            "openrouter:google/gemma-4-26b-a4b-it:free",
         )
         for entry in (e.strip() for e in spec.split(",") if e.strip()):
             provider, _, model = entry.partition(":")

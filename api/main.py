@@ -41,7 +41,12 @@ from core.embedder import Embedder, EmbedderConfig
 from core.extractive import extract_answer
 from core.index import ChunkIndex
 from core.harness import RAGHarness
-from core.retriever import DEFAULT_ENSEMBLE, FULL_ENSEMBLE, AdaptiveRetriever
+from core.retriever import (
+    DEFAULT_ENSEMBLE,
+    ENGLISH_INDEX,
+    FULL_ENSEMBLE,
+    AdaptiveRetriever,
+)
 from core.stt import SarvamSTT
 
 DATA_ROOT = Path(os.getenv("DATA_ROOT", "/data" if Path("/data").is_dir() else "./data"))
@@ -77,17 +82,25 @@ async def lifespan(app: FastAPI):
 
     # Load every index once; configurations below are views over these objects.
     indexes: dict[str, ChunkIndex] = {}
-    for name in COMPARE:
+    for name in [*COMPARE, ENGLISH_INDEX]:
         if (INDEX_ROOT / name / "hnsw.bin").exists():
             indexes[name] = ChunkIndex.load(INDEX_ROOT, name)
     if not indexes:
         raise RuntimeError(f"no indexes found under {INDEX_ROOT}")
 
     serve_names = [n for n in SERVE if n in indexes] or list(indexes)[:1]
+    english = (
+        AdaptiveRetriever({ENGLISH_INDEX: indexes[ENGLISH_INDEX]})
+        if ENGLISH_INDEX in indexes else None
+    )
     harness = RAGHarness(
         INDEX_ROOT,
         embedder=embedder,
         retriever=AdaptiveRetriever({n: indexes[n] for n in serve_names}),
+        # Tunable per deployment: context width trades generation latency against
+        # the chance the answer is in the window at all. Measured both ways below.
+        context_passages=int(os.getenv("CONTEXT_PASSAGES", "4")),
+        english_retriever=english,
     )
     harness.warm()
 
@@ -153,6 +166,7 @@ def _answer_payload(r) -> dict:
             for s in r.sources
         ],
         "retrieval_provenance": r.retrieval_provenance,
+        "route": r.route,
         "timings_ms": r.timings_ms,
         "fast_path_ms": r.fast_path_ms,
         "total_ms": r.total_ms,
@@ -177,6 +191,7 @@ def health() -> dict:
         "stt_configured": STATE["stt"].configured,
         "startup_ms": STATE["started_ms"],
         "index_tag": INDEX_TAG,
+        "english_index": ENGLISH_INDEX in STATE["indexes"],
     }
 
 
@@ -248,9 +263,13 @@ def compare(req: AskRequest) -> dict:
     indexes: dict[str, ChunkIndex] = STATE["indexes"]
 
     qvec = embedder.encode_query(req.question)
-    configs: dict[str, list[str]] = {n: [n] for n in indexes}
-    if len(indexes) > 1:
-        configs["ENSEMBLE"] = list(indexes)
+    # Only the Indic chunking strategies belong in this comparison. The English
+    # index is a different *corpus*, not a different way of chunking the same one,
+    # so including it would compare unlike things and read as a fourth strategy.
+    strategies = [n for n in indexes if n in FULL_ENSEMBLE]
+    configs: dict[str, list[str]] = {n: [n] for n in strategies}
+    if len(strategies) > 1:
+        configs["ENSEMBLE"] = strategies
 
     rows = []
     for label, names in configs.items():

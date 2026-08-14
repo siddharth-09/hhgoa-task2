@@ -30,6 +30,7 @@ candidates.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,6 +81,38 @@ DEFAULT_ENSEMBLE = ["metadata_128"]
 # The full set, kept for benchmarking and for `--ensemble` overrides. Nothing here
 # is deleted: the ablation is meant to be re-runnable when the corpus grows.
 FULL_ENSEMBLE = ["fixed_256", "semantic_128", "metadata_128"]
+
+# Index of the original English text. MSMARCO-XI carries every passage in English
+# as well as in translation, and only the translation was ever indexed -- so an
+# English question could not reach the answer even when the corpus contained it.
+ENGLISH_INDEX = "english_256"
+
+_DEVA = re.compile(r"[ऀ-ॿ]")
+_LATIN = re.compile(r"[A-Za-z]")
+
+
+def is_latin_query(text: str, threshold: float = 0.9) -> bool:
+    """Should this query go to the English index?
+
+    Routing on *script* rather than on detected language, deliberately. Script is
+    observable and deterministic; language is a guess, and the guess is wrong in
+    exactly the case that matters most here -- romanised Hindi ("bharat ki
+    rajdhani kya hai") is Latin script but Hindi language, and a language detector
+    would confidently send it the wrong way.
+
+    The threshold is high on purpose. A query is only treated as English when it
+    is *overwhelmingly* Latin, so code-mixed input ("लिफ्ट का मतलब है", "Taj Mahal
+    किसने बनवाया") keeps going to the Devanagari index, which is where its answer
+    lives. Anything with real Devanagari content stays on the path that already
+    works; the English index is additive, not a replacement.
+    """
+    if not text:
+        return False
+    latin = len(_LATIN.findall(text))
+    deva = len(_DEVA.findall(text))
+    if latin + deva == 0:
+        return False
+    return latin / (latin + deva) >= threshold
 
 
 @dataclass(slots=True)

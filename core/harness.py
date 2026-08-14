@@ -40,9 +40,10 @@ from pathlib import Path
 from core.embedder import Embedder, EmbedderConfig
 from core.extractive import ExtractiveAnswer, extract_answer
 from core.guardrails import ABSTAIN_TEXT as ABSTAIN_MESSAGE
+from core.guardrails import MIN_SUPPORT as GUARD_MIN_SUPPORT
 from core.guardrails import Decision, check_input, check_output, strip_greeting_prefix
 from core.llm import GenerationResult, LLMChain, LLMClient
-from core.retriever import AdaptiveRetriever
+from core.retriever import AdaptiveRetriever, is_latin_query
 
 # Upper bound on the question text, in characters.
 #
@@ -60,6 +61,15 @@ from core.retriever import AdaptiveRetriever
 # seconds, which is perhaps 300 characters of speech. So this bounds the tail
 # without touching a single genuine query.
 MAX_QUERY_CHARS = 512
+
+# Grounding-gate bands. MIN_SUPPORT mirrors core.guardrails; BORDERLINE is the
+# floor below which a query is not worth an LLM call at all.
+#
+#   support >= MIN_SUPPORT        fast answer stands, generation may improve it
+#   BORDERLINE <= s < MIN_SUPPORT the model adjudicates -- see answer()
+#   support <  BORDERLINE         abstain immediately, no call
+MIN_SUPPORT = GUARD_MIN_SUPPORT
+BORDERLINE_SUPPORT = 0.30
 
 
 @dataclass(slots=True)
@@ -82,6 +92,7 @@ class AnswerResult:
     extractive_answer: str = ""
     generated_answer: str = ""
     answer_source: str = ""  # "extractive" | "generated" | "refusal" | "abstain"
+    route: str = ""  # which index served this query -- "indic" or "english"
 
     support: float = 0.0
     grounding: float = 0.0
@@ -115,18 +126,27 @@ class RAGHarness:
         *,
         threads: int = 0,
         top_k: int = 10,
-        # How many retrieved passages the LLM is shown. Measured on 60 labelled
-        # queries, the gold passage sits in the top-4 only 43% of the time but in
-        # the top-8 58% -- so a quarter of "the context is insufficient" verdicts
-        # were the model being told the truth about a window that was too narrow,
-        # not a limitation of the corpus.
+        # How many retrieved passages the LLM is shown.
         #
-        # Costs tokens, not budget: generation sits outside the measured 200ms.
-        # Kept at 8 rather than 10 because recall is flat from 8 to 10 (58% both),
-        # so the extra two passages would add distractors and prompt size for
-        # nothing.
-        context_passages: int = 8,
+        # Widening this looked obviously right and measured as worthless. Gold
+        # recall does improve with the window -- the answer sits in the top-4 43%
+        # of the time and in the top-8 58% -- so a wider window should have let
+        # the model answer more often. It did not. A/B on the same 18 queries:
+        #
+        #   passages=4   generated 13/18   generate p50  428ms
+        #   passages=8   generated 13/18   generate p50 1013ms
+        #
+        # Identical answer rate, 2.4x the latency, because prompt size drives
+        # generation time. The extra passages were distractors the model already
+        # knew to ignore, and the queries it declines are declined for reasons a
+        # wider window does not fix.
+        #
+        # Kept at 4 on measurement, not on the recall argument. Override with
+        # CONTEXT_PASSAGES if a future corpus behaves differently -- but re-measure
+        # rather than assuming, because this one did not go the intuitive way.
+        context_passages: int = 4,
         retriever: AdaptiveRetriever | None = None,
+        english_retriever: AdaptiveRetriever | None = None,
     ):
         self.embedder = embedder or Embedder(EmbedderConfig(threads=threads))
         # An injected retriever lets several harnesses share one set of loaded
@@ -134,6 +154,12 @@ class RAGHarness:
         # by side, and loading each subset separately would hold the same 2GB of
         # index several times over.
         self.retriever = retriever or AdaptiveRetriever.load(index_root, ensemble)
+        # Optional English-source index. MSMARCO-XI ships the original English
+        # alongside the translation, and only the translation was indexed -- so an
+        # English question could not reach an answer the corpus demonstrably held.
+        # Routing is by script (see is_latin_query): additive, and the Devanagari
+        # path is untouched unless the query is overwhelmingly Latin.
+        self.english_retriever = english_retriever
         self.llm = llm or LLMChain.from_env()
         self.top_k = top_k
         self.context_passages = context_passages
@@ -184,10 +210,16 @@ class RAGHarness:
         if len(question) > MAX_QUERY_CHARS:
             question = question[:MAX_QUERY_CHARS]
 
+        # Script decides the index. Recorded on the result so the UI and the
+        # eval can both see which corpus answered, rather than inferring it.
+        use_english = self.english_retriever is not None and is_latin_query(question)
+        retriever = self.english_retriever if use_english else self.retriever
+        r.route = "english" if use_english else "indic"
+
         qvec = self.embedder.encode_query(question)
         t2 = mark("embed_query", t1)
 
-        retrieval = self.retriever.search(qvec, question, k=self.top_k)
+        retrieval = retriever.search(qvec, question, k=self.top_k)
         t3 = mark("retrieve", t2)
         r.retrieval_provenance = retrieval.provenance()
         r.sources = [
@@ -210,13 +242,60 @@ class RAGHarness:
         r.grounding = round(out.grounding, 4)
         r.fast_path_ms = round((time.perf_counter() - t_start) * 1000, 3)
 
-        if out.blocked:
+        # A borderline score should not veto the model.
+        #
+        # The gate is token overlap between the extracted span and the context.
+        # That is a cheap proxy, and on a near-miss it was silently deciding a
+        # question the LLM is far better qualified to answer -- measured live,
+        # "दिल्ली शहर क्या है?" scored 0.4318 against a 0.45 gate and abstained
+        # *without generation ever running*, over a margin of 0.018.
+        #
+        # So the gate now only decides the clear cases. Below BORDERLINE there is
+        # nothing worth spending a call on; above the gate the fast answer stands
+        # as before; in between, generation runs and the model's own sufficiency
+        # verdict settles it. That is the same principle already applied in the
+        # other direction: when the model says the context is inadequate we
+        # abstain despite a passing score.
+        #
+        # The extractive span is deliberately NOT served in the borderline band --
+        # it did not clear the gate. Only a generated answer that the model calls
+        # sufficient *and* that passes verification can rescue the query.
+        borderline = generate and BORDERLINE_SUPPORT <= extracted.support < MIN_SUPPORT
+
+        if out.blocked and not borderline:
             r.answer = out.message
             r.decision = out.decision.value
             r.reason = out.reason
             r.answer_source = "abstain"
             r.timings_ms = t
             r.total_ms = r.fast_path_ms
+            return r
+
+        if borderline:
+            # Provisional: abstain unless generation rescues it below.
+            r.answer = out.message
+            r.decision = out.decision.value
+            r.reason = "borderline_support_deferred_to_llm"
+            r.answer_source = "abstain"
+            gen = self.llm.generate(question, contexts)
+            t6 = mark("generate", t5)
+            r.llm_ok, r.llm_error, r.llm_attempts = gen.ok, gen.error, gen.attempts
+
+            if gen.ok and gen.sufficient and gen.answer:
+                gver = check_output(gen.answer, contexts, MIN_SUPPORT)
+                mark("verify", t6)
+                if not gver.blocked:
+                    r.generated_answer = gen.answer
+                    r.answer = gen.answer
+                    r.answer_source = "generated"
+                    r.decision = Decision.ALLOW.value
+                    r.citations = gen.citations
+                    r.grounding = round(gver.grounding, 4)
+                    r.reason = "rescued_by_llm_from_borderline_support"
+                else:
+                    r.reason = f"borderline_and_generation_rejected:{gver.reason}"
+            r.timings_ms = t
+            r.total_ms = round((time.perf_counter() - t_start) * 1000, 3)
             return r
 
         # The fast answer is valid from here on. Everything below can only

@@ -66,6 +66,17 @@ CASES: list[tuple[str, str, str]] = [
     ("मैनहट्टन परियोजना की सफलता का तुरंत क्या प्रभाव पड़ा?", "answered", "Hindi descriptive"),
     ("सामाजिक सुरक्षा विकलांगता के प्रकार", "answered",  "Hindi enumerative"),
 
+    # ── English routing (english_256 index, routed by script) ───────────
+    # In-corpus English must now answer rather than abstain: the answer was
+    # always in data/raw as text_eng, just never indexed.
+    ("What is the capital of India?",   "answered",  "in corpus (English source) — was abstaining"),
+    ("types of social security disability", "answered", "in corpus (English source)"),
+    # Out-of-corpus English must still abstain. The pilot warned the English
+    # index raises support across the board, so this is the case that proves the
+    # guardrail still holds rather than the system just becoming more eager.
+    ("who is the prime minister of India", "abstain", "not in corpus — must not invent"),
+    ("who won the 2026 olympics",        "abstain",  "post-dates the corpus"),
+
     # ── req 1: input arrives however STT produces it ────────────────────
     ("bharat ki rajdhani kya hai",     "any",       "romanised Hindi — recorded, not asserted"),
     ("लिफ्ट का मतलब है",                 "any",       "code-mixed, as STT often emits"),
