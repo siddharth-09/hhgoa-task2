@@ -37,43 +37,36 @@ curl -s "https://pucho.me/benchmark?n=100"
 
 ```mermaid
 flowchart TD
-    A["🎤 Voice input"] --> B["Sarvam Saaras v3<br/><i>STT · ~500-1300ms</i>"]
+    A["🎤 Voice input"] --> B["Sarvam Saaras v3<br/>STT · 500-1300ms"]
     A2["⌨️ Typed question"] --> G1
     B -->|transcript| G1
 
-    subgraph BUDGET["⏱️ THE 200ms BUDGET — measured window (P50 64ms)"]
-        direction TB
-        G1["🛡️ Input guardrail<br/><i>intent check · 0.01ms</i>"]
-        G1 -->|"unsafe → refuse"| REFUSE["❌ Refusal"]
+    subgraph BUDGET["⏱️ 200ms BUDGET — measured window · P50 64ms"]
+        G1["🛡️ Input guardrail<br/>intent check · 0.01ms"]
+        G1 -->|unsafe| REFUSE["❌ Refuse"]
         G1 -->|allowed| CAP["Cap query at 512 chars"]
-        CAP --> EMB["🔢 Embed query<br/><i>multilingual-e5-small int8 · 1.7ms</i>"]
-
-        EMB --> HYB
-        subgraph HYB["🔍 Hybrid retrieval over metadata_128 · 2.3ms"]
-            direction LR
-            DENSE["Dense — HNSW<br/><i>cosine, 384-dim</i>"]
-            SPARSE["Sparse — BM25<br/><i>script-aware tokens</i>"]
-            DENSE --> RRF["RRF fusion<br/><i>by rank, not score</i>"]
-            SPARSE --> RRF
-        end
-
-        HYB --> EXT["✂️ Extractive answer<br/><i>best-supported span · 26ms</i>"]
-        EXT --> G2["🛡️ Grounding gate<br/><i>abstain if unsupported</i>"]
-        G2 -->|"support < 0.45"| ABS["🤷 Abstain"]
-        G2 -->|grounded| FAST["✅ FAST ANSWER<br/><b>grounded + cited, &lt;200ms</b>"]
+        CAP --> EMB["🔢 Embed query<br/>e5-small int8 · 1.7ms"]
+        EMB --> DENSE["Dense — HNSW<br/>cosine, 384-dim"]
+        EMB --> SPARSE["Sparse — BM25<br/>script-aware tokens"]
+        DENSE --> RRF["RRF fusion<br/>by rank, not score · 2.3ms"]
+        SPARSE --> RRF
+        RRF --> EXT["✂️ Extractive answer<br/>best-supported span · 26ms"]
+        EXT --> G2["🛡️ Grounding gate"]
+        G2 -->|"support below 0.45"| ABS["🤷 Abstain"]
+        G2 -->|grounded| FAST["✅ FAST ANSWER<br/>grounded + cited"]
     end
 
-    FAST --> LLM["🤖 LLM polish<br/><i>Gemini · ~1.3s · outside budget</i>"]
-    LLM --> VER["🛡️ Verify generated text<br/><i>novel-fact check</i>"]
+    FAST --> LLM["🤖 LLM polish<br/>Gemini · 1.3s · outside budget"]
+    LLM --> VER["🛡️ Verify generated text<br/>novel-fact check"]
     VER -->|passes| FINAL["✨ Polished answer"]
-    VER -->|"rejected / timeout / error"| FAST
+    VER -->|"rejected, timeout or error"| KEEP["↩️ Keep the fast answer"]
 
     style BUDGET fill:#0d2818,stroke:#3fb950,stroke-width:3px,color:#e6edf3
-    style HYB fill:#1c2a3a,stroke:#4c9aff,color:#e6edf3
-    style FAST fill:#1a4d2e,stroke:#3fb950,stroke-width:2px,color:#fff
-    style FINAL fill:#1d3f6b,stroke:#4c9aff,color:#fff
-    style REFUSE fill:#4d1f1c,stroke:#f85149,color:#fff
-    style ABS fill:#4d3c15,stroke:#d29922,color:#fff
+    style FAST fill:#1a4d2e,stroke:#3fb950,stroke-width:2px,color:#ffffff
+    style FINAL fill:#1d3f6b,stroke:#4c9aff,color:#ffffff
+    style KEEP fill:#1a4d2e,stroke:#3fb950,color:#ffffff
+    style REFUSE fill:#4d1f1c,stroke:#f85149,color:#ffffff
+    style ABS fill:#4d3c15,stroke:#d29922,color:#ffffff
 ```
 
 ### The one design decision that matters
