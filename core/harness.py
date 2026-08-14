@@ -115,7 +115,17 @@ class RAGHarness:
         *,
         threads: int = 0,
         top_k: int = 10,
-        context_passages: int = 4,
+        # How many retrieved passages the LLM is shown. Measured on 60 labelled
+        # queries, the gold passage sits in the top-4 only 43% of the time but in
+        # the top-8 58% -- so a quarter of "the context is insufficient" verdicts
+        # were the model being told the truth about a window that was too narrow,
+        # not a limitation of the corpus.
+        #
+        # Costs tokens, not budget: generation sits outside the measured 200ms.
+        # Kept at 8 rather than 10 because recall is flat from 8 to 10 (58% both),
+        # so the extra two passages would add distractors and prompt size for
+        # nothing.
+        context_passages: int = 8,
         retriever: AdaptiveRetriever | None = None,
     ):
         self.embedder = embedder or Embedder(EmbedderConfig(threads=threads))

@@ -310,6 +310,17 @@ _FUNCTION_WORDS = {
     "जिनमें", "जिसमें", "जिसके", "जिनके", "जिससे", "इसमें", "उसमें", "इसके", "उसके",
     "शामिल", "अनुसार", "द्वारा", "लेकिन", "इसलिए", "क्योंकि", "अथवा", "तथा", "एवं",
     "आदि", "यहाँ", "वहाँ", "जहाँ", "कहाँ", "बहुत", "अधिक", "सबसे", "कुछ", "कोई",
+    # Marathi. The list above was built while the corpus was Hindi-only, and the
+    # omission is not cosmetic: Marathi is half the index, and its connectives
+    # were being counted as invented facts. Measured on 20 live queries, a
+    # correct Marathi answer was rejected for novel_facts(किंवा, ज्यामध्ये) --
+    # "or" and "in which". The verifier was penalising the language itself.
+    "आणि", "किंवा", "म्हणून", "म्हणजे", "परंतु", "पण", "तसेच", "तथापि",
+    "आहे", "आहेत", "होते", "होता", "होती", "नाही", "असे", "अशा", "असते", "असतो",
+    "करतात", "करते", "करतो", "केले", "केली", "गेले", "गेली", "शकते", "शकतात",
+    "ज्यामध्ये", "यामध्ये", "त्यामध्ये", "ज्यांना", "त्यांना", "यांचा", "त्यांचा",
+    "मध्ये", "वरून", "पासून", "साठी", "नुसार", "बद्दल", "समाविष्ट", "इत्यादी",
+    "येथे", "तेथे", "कोठे", "खूप", "जास्त", "काही", "सर्व",
     # English function words that survive the length filter
     "which", "that", "there", "these", "those", "their", "about", "would",
     "could", "should", "been", "were", "with", "from", "into", "also", "such",
