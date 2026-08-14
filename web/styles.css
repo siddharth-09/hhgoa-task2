@@ -273,6 +273,9 @@ body.answered .samples:hover { opacity: 1; transform: none; }
 .tier[data-state="active"] b { color: var(--signal); }
 .tier[data-state="active"] em { color: var(--grounded); }
 .tier[data-state="pending"] em { color: var(--signal); animation: blink 1s steps(2) infinite; }
+.tier[data-state="declined"] { color: var(--fg-dim); }
+.tier[data-state="declined"] b { color: var(--abstain); }
+.tier[data-state="declined"] em { color: var(--abstain); }
 .tier-link { width: 26px; height: 1px; background: var(--line-hot); }
 .close {
   background: none; border: 0; color: var(--fg-faint); cursor: pointer;

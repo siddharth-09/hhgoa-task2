@@ -39,7 +39,8 @@ from pathlib import Path
 
 from core.embedder import Embedder, EmbedderConfig
 from core.extractive import ExtractiveAnswer, extract_answer
-from core.guardrails import Decision, check_input, check_output
+from core.guardrails import ABSTAIN_TEXT as ABSTAIN_MESSAGE
+from core.guardrails import Decision, check_input, check_output, strip_greeting_prefix
 from core.llm import GenerationResult, LLMChain, LLMClient
 from core.retriever import AdaptiveRetriever
 
@@ -156,14 +157,20 @@ class RAGHarness:
             r.answer = verdict.message
             r.decision = verdict.decision.value
             r.reason = verdict.reason
-            r.answer_source = "refusal"
+            # A greeting is not a refusal -- nothing was denied, there was simply
+            # no question to answer. Collapsing the two would make the UI report
+            # a blocked query every time someone says hello.
+            r.answer_source = (
+                "greeting" if verdict.decision is Decision.GREETING else "refusal"
+            )
             r.timings_ms = t
             r.total_ms = r.fast_path_ms = round((time.perf_counter() - t_start) * 1000, 3)
             return r
 
         # 2-4. Fast path: embed -> retrieve -> extract.
-        # Bounded here rather than inside the embedder so that retrieval, lexical
-        # matching and extraction all see the same question text.
+        # Normalised here rather than inside the embedder so that retrieval,
+        # lexical matching and extraction all see the same question text.
+        question = strip_greeting_prefix(question)
         if len(question) > MAX_QUERY_CHARS:
             question = question[:MAX_QUERY_CHARS]
 
@@ -236,8 +243,23 @@ class RAGHarness:
                 # Generated text failed verification -> keep the extractive span.
                 r.reason = f"generation_rejected:{gver.reason}"
         elif gen.ok and not gen.sufficient:
-            # The model itself reported the context was insufficient. Trust it,
-            # but we still have a grounded span that passed its own check.
+            # The model read the *same* context and judged it inadequate. Keeping
+            # the extractive span here treats that judgment as noise -- and the
+            # span is drawn from exactly the context the model just rejected.
+            #
+            # Measured case that forced this: "Hello" retrieved a passage reading
+            # "CIL is more complex than C# ... System.Console.WriteLine(Hello,
+            # World!)". Lexical overlap on the literal token put support at 0.602,
+            # clearing the 0.45 gate, so the span was served as an answer while
+            # the LLM was correctly reporting the context did not answer anything.
+            #
+            # Two independent checks disagreeing is not a tie to be broken in
+            # favour of the weaker one. The grounding gate measures token overlap;
+            # the model measures whether the question is actually answered. When
+            # the stronger signal says no, abstain.
+            r.answer = ABSTAIN_MESSAGE
+            r.answer_source = "abstain"
+            r.decision = Decision.ABSTAIN_UNGROUNDED.value
             r.reason = "llm_reported_insufficient"
         elif not gen.ok:
             r.reason = f"llm_failed:{gen.error[:120]}"

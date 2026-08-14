@@ -45,6 +45,7 @@ class Decision(str, Enum):
     REFUSE_UNSAFE = "refuse_unsafe"
     ABSTAIN_UNGROUNDED = "abstain_ungrounded"
     ABSTAIN_EMPTY = "abstain_empty"
+    GREETING = "greeting"
 
 
 # Support score below which we treat the corpus as not covering the question.
@@ -127,6 +128,34 @@ ABSTAIN_TEXT = (
     "I don't have enough information in my sources to answer that."
 )
 
+GREETING_TEXT = (
+    "नमस्ते! मुझसे दस्तावेज़ों के बारे में कोई प्रश्न पूछिए। "
+    "Hello! Ask me a question about the indexed documents — try “भारत की राजधानी क्या है?”"
+)
+
+# Greetings and other conversational openers are not questions, and retrieval
+# treats them terribly. Measured: "Hello" scored **0.602 support** against a
+# passage reading "CIL is more complex than C# ... System.Console.WriteLine(Hello,
+# World!)" -- a lexical collision on the literal string "Hello". That cleared the
+# 0.45 grounding gate and was served as an answer.
+#
+# The grounding gate cannot catch this, because the passage genuinely *is* in the
+# corpus and genuinely *does* contain the token. The defect is upstream: a
+# greeting has no informational intent to satisfy, so the right move is to answer
+# conversationally and never spend retrieval at all. Requirement 6 calls this
+# "off-topic queries".
+#
+# Deliberately narrow -- it matches only when the *entire* input is a greeting, so
+# "hello, who built the Taj Mahal?" still retrieves normally.
+_GREETING = re.compile(
+    r"^\W*(hi|hey+|hello+|yo|hola|namaste|namaskar|नमस्ते|नमस्कार|हॅलो|हैलो|"
+    r"good\s+(morning|afternoon|evening)|"
+    r"how\s+are\s+you|what'?s\s+up|kaise?\s+ho|कैसे\s+हो|test|testing|"
+    r"thanks?|thank\s+you|dhanyavaad|धन्यवाद|ok|okay|bye)"
+    r"[\s!.?,]*$",
+    re.I,
+)
+
 
 def _tokens(s: str) -> set[str]:
     # core.text, not re.findall(r"\w+"): \w drops Devanagari matras and would
@@ -160,6 +189,32 @@ class OutputVerdict:
         return self.decision is not Decision.ALLOW
 
 
+# Same vocabulary as _GREETING, but matched as a *prefix* followed by real
+# content, so "hi, भारत की राजधानी क्या है?" retrieves on the question alone.
+_GREETING_PREFIX = re.compile(
+    r"^\W*(hi|hey+|hello+|yo|hola|namaste|namaskar|नमस्ते|नमस्कार|हॅलो|हैलो|"
+    r"good\s+(morning|afternoon|evening)|ok|okay|so|um+|uh+)"
+    r"[\s,!.\-—:]+(?=\S)",
+    re.I,
+)
+
+
+def strip_greeting_prefix(query: str) -> str:
+    """Drop a leading greeting so it doesn't dilute retrieval.
+
+    Spoken questions routinely open with one, and every extra token shifts the
+    query embedding away from the passage that answers it. Measured on the live
+    deployment: "भारत की राजधानी क्या है?" answers with support 0.787, while
+    "hello, भारत की राजधानी क्या है?" fell under the 0.45 gate and abstained --
+    the same question, refused because of the hello.
+
+    Only strips when substantive text follows, so a bare "hello" still reaches
+    the greeting branch of check_input rather than becoming an empty query.
+    """
+    stripped = _GREETING_PREFIX.sub("", query or "", count=1)
+    return stripped if len(stripped.strip()) >= 3 else (query or "")
+
+
 def check_input(query: str, *, min_chars: int = 2) -> InputVerdict:
     """Run before retrieval. Cheap, deterministic, no model call."""
     q = (query or "").strip()
@@ -168,6 +223,16 @@ def check_input(query: str, *, min_chars: int = 2) -> InputVerdict:
             Decision.ABSTAIN_EMPTY,
             reason="empty_or_too_short",
             message="मुझे प्रश्न सुनाई नहीं दिया। I didn't catch that — could you repeat?",
+        )
+
+    # Checked after the length guard but before the unsafe patterns, so a bare
+    # greeting never reaches retrieval. Unsafe intent still wins over a greeting
+    # because the patterns below are matched on the full string.
+    if _GREETING.match(q):
+        return InputVerdict(
+            Decision.GREETING,
+            reason="greeting_not_a_question",
+            message=GREETING_TEXT,
         )
 
     flags: list[str] = []

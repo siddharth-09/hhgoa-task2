@@ -159,7 +159,7 @@ function renderAnswer(d, tier) {
 
   const ans = $('#answer');
   ans.textContent = d.answer || '(no answer)';
-  ans.classList.toggle('muted', d.answer_source === 'abstain' || d.answer_source === 'refusal');
+  ans.classList.toggle('muted', ['abstain', 'refusal', 'greeting'].includes(d.answer_source));
 
   // tier track
   const t1 = document.querySelector('.tier.t1');
@@ -169,6 +169,13 @@ function renderAnswer(d, tier) {
     setTier(t2, 'active', ms(d.total_ms));
   } else if (tier === 'pending') {
     setTier(t2, 'pending', '···');
+  } else if (d.reason === 'llm_reported_insufficient') {
+    // The LLM ran and judged the context inadequate. Saying "declined" rather
+    // than showing a blank makes it clear generation happened and had an
+    // opinion -- which is the point of running it at all.
+    setTier(t2, 'declined', 'declined');
+  } else if (d.llm_error) {
+    setTier(t2, 'declined', 'failed');
   } else {
     setTier(t2, 'idle', '—');
   }
@@ -178,9 +185,10 @@ function renderAnswer(d, tier) {
   // verdicts — the guardrail decisions, stated plainly
   const v = [];
   const src = d.answer_source;
-  if (src === 'refusal')      v.push(`<span class="v bad">refused · ${esc(d.reason || 'unsafe intent')}</span>`);
-  else if (src === 'abstain') v.push(`<span class="v warn">abstained · not supported by corpus</span>`);
-  else                        v.push(`<span class="v good">grounded</span>`);
+  if (src === 'refusal')       v.push(`<span class="v bad">refused · ${esc(d.reason || 'unsafe intent')}</span>`);
+  else if (src === 'greeting') v.push(`<span class="v">not a question · no retrieval spent</span>`);
+  else if (src === 'abstain')  v.push(`<span class="v warn">abstained · ${esc(d.reason === 'llm_reported_insufficient' ? 'model judged context inadequate' : 'not supported by corpus')}</span>`);
+  else                         v.push(`<span class="v good">grounded</span>`);
   if (d.support   != null) v.push(`<span class="v">support ${d.support.toFixed(3)}</span>`);
   if (d.grounding != null) v.push(`<span class="v">grounding ${d.grounding.toFixed(3)}</span>`);
   if (d.citations?.length) v.push(`<span class="v good">cited [${d.citations.join(', ')}]</span>`);
