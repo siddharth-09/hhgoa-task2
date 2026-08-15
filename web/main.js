@@ -259,21 +259,33 @@ async function ask(question) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question, generate: false }),
     });
-    renderAnswer(fast, fast.decision === 'allow' ? 'pending' : 'idle');
+    // Generation is worth running on an abstain too -- it can rescue a borderline
+    // query, and it produces the clearly-labelled unsourced answer. Only a refusal
+    // or a greeting ends the exchange here.
+    const willGenerate = !['refusal', 'greeting'].includes(fast.answer_source);
+    renderAnswer(fast, willGenerate ? 'pending' : 'idle');
     $('#hint').textContent = `answered in ${ms(fast.fast_path_ms)} — no LLM involved`;
     pulse(0.5);
 
     // Tier 2 — LLM polish. Can only replace the answer, never remove it.
-    if (fast.decision === 'allow') {
+    //
+    // This used to be gated on `decision === 'allow'`, which meant an abstain
+    // never made the call at all: the page showed "no LLM involved" while the
+    // API would happily have returned both a rescue attempt and the unsourced
+    // answer. The gate belongs on refusals and greetings, not on abstains.
+    if (willGenerate) {
       try {
         const full = await api('/ask', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ question, generate: true }),
         });
         renderAnswer(full, full.answer_source === 'generated' ? 'generated' : 'idle');
-        $('#hint').textContent = full.answer_source === 'generated'
-          ? `polished in ${ms(full.total_ms)} · fast answer stood at ${ms(full.fast_path_ms)}`
-          : `kept the extracted answer — ${esc(full.reason || 'generation not used')}`;
+        $('#hint').textContent =
+          full.answer_source === 'generated'
+            ? `polished in ${ms(full.total_ms)} · fast answer stood at ${ms(full.fast_path_ms)}`
+            : full.unsourced_answer
+              ? `corpus could not answer — showing the model's own knowledge, unverified`
+              : `kept the extracted answer — ${esc(full.reason || 'generation not used')}`;
       } catch {
         setTier(document.querySelector('.tier.t2'), 'idle', '—');
         $('#hint').textContent = 'generation unavailable — the grounded answer stands';

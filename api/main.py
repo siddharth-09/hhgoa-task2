@@ -349,5 +349,25 @@ def benchmark(n: int = 100, warmup: int = 10) -> dict:
     }
 
 
+class RevalidatingStatic(StaticFiles):
+    """Serve the UI with `no-cache`, so a redeploy is picked up immediately.
+
+    Without an explicit Cache-Control the browser applies its own heuristic and
+    happily keeps a stale main.js. That bit us for real: the API was returning
+    `unsourced_answer` correctly while the page showed nothing, because the
+    browser was still running the previous deploy's JavaScript.
+
+    `no-cache` does not mean "do not cache" -- the file is still stored, but the
+    browser must revalidate against the ETag before using it. A 304 costs one
+    round trip and a few bytes, which is the right trade for a demo that will be
+    updated repeatedly and must never be judged on a stale build.
+    """
+
+    async def get_response(self, path: str, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
+
+
 if WEB_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+    app.mount("/", RevalidatingStatic(directory=str(WEB_DIR), html=True), name="web")
