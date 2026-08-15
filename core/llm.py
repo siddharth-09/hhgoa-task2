@@ -45,6 +45,22 @@ Rules:
 Return ONLY a JSON object, no markdown fence:
 {"answer": str, "sufficient": bool, "citations": [int]}"""
 
+# Used ONLY when retrieval found nothing and the system has already abstained.
+# The answer it produces is never merged into the grounded answer, never cited,
+# and never scored for grounding -- it is surfaced separately and labelled, so a
+# reader can always tell corpus-backed text from model recall. Requirement 6 is
+# about not passing off ungrounded text as grounded; keeping the two visibly
+# apart is how this stays on the right side of that line.
+UNSOURCED_PROMPT = """Answer the question from your own general knowledge.
+
+Rules:
+- Answer in the SAME language AND SCRIPT as the question. Never mix scripts.
+- One or two sentences, a complete sentence, not a fragment.
+- If you are genuinely unsure, set "sufficient" to false.
+
+Return ONLY a JSON object, no markdown fence:
+{"answer": str, "sufficient": bool, "citations": []}"""
+
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
 
 
@@ -116,6 +132,7 @@ class LLMClient:
         # returned by then, and generation replaces it when it lands.
         self.timeout_s = timeout_s or float(os.getenv("LLM_TIMEOUT_S", "30"))
         self._client: Any = None
+        self._system: str = SYSTEM_PROMPT
 
         if self.provider == "gemini":
             # "-latest" aliases, not pinned versions: models.list() happily returns
@@ -188,7 +205,7 @@ class LLMClient:
             model=self.model,
             contents=prompt,
             config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=self._system,
                 max_output_tokens=max_tokens,
                 temperature=0.0,  # deterministic: this is extraction, not writing
                 response_mime_type="application/json",
@@ -221,7 +238,7 @@ class LLMClient:
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self._system},
                 {"role": "user", "content": prompt},
             ],
             "max_tokens": max_tokens,
@@ -261,7 +278,7 @@ class LLMClient:
 
         resp = self._client.converse(
             modelId=self.model,
-            system=[{"text": SYSTEM_PROMPT}],
+            system=[{"text": self._system}],
             messages=[{"role": "user", "content": [{"text": prompt}]}],
             inferenceConfig={"maxTokens": max_tokens, "temperature": 0.0},
         )
@@ -279,7 +296,7 @@ class LLMClient:
             model=self.model,
             max_tokens=max_tokens,
             temperature=0.0,
-            system=SYSTEM_PROMPT,
+            system=self._system,
             messages=[{"role": "user", "content": prompt}],
         )
         return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
@@ -295,7 +312,11 @@ class LLMClient:
         retries: int = 2,
         backoff_s: float = 0.4,
         rate_limit_backoff_s: float = 3.0,
+        system: str | None = None,
     ) -> GenerationResult:
+        # Per-call system prompt. Defaults to the grounded contract; the unsourced
+        # path passes UNSOURCED_PROMPT explicitly and nothing else may.
+        self._system = system or SYSTEM_PROMPT
         """Generate a grounded answer. Never raises -- check `.ok`.
 
         Retries cover transient faults (timeout, 429, 5xx) and malformed JSON.
@@ -310,12 +331,15 @@ class LLMClient:
             base.error = f"{self.provider}: no credentials configured"
             base.took_ms = round((time.perf_counter() - t0) * 1000, 2)
             return base
-        if not contexts:
+        # Guards the *grounded* path: generating from zero passages there would be
+        # ungrounded by construction. The unsourced path has no context by
+        # definition, and says so via its own system prompt.
+        if not contexts and self._system is not UNSOURCED_PROMPT:
             base.error = "no context passages"
             base.took_ms = round((time.perf_counter() - t0) * 1000, 2)
             return base
 
-        prompt = build_prompt(question, contexts)
+        prompt = build_prompt(question, contexts) if contexts else f"QUESTION: {question}"
         call = {
             "gemini": self._gemini,
             "openrouter": self._openai_compatible,
@@ -500,6 +524,15 @@ class LLMChain:
             }
             for i, c in enumerate(self.clients)
         ]
+
+    def generate_unsourced(self, question: str) -> GenerationResult:
+        """Answer from the model's own knowledge, with no corpus behind it.
+
+        Only called after the system has already abstained, and the result is kept
+        in its own field so it can never be mistaken for a grounded answer. No
+        context is passed at all -- that is the point: there was none.
+        """
+        return self.generate(question, [], system=UNSOURCED_PROMPT, retries=0)
 
     def generate(self, question: str, contexts: list[str], **kw) -> GenerationResult:
         """Try providers in order, skipping any still cooling down.

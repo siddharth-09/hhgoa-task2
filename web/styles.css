@@ -481,3 +481,29 @@ code {
   html { scroll-behavior: auto; }
   #field { display: none; }
 }
+
+/* ── unsourced answer ─────────────────────────────────────────
+   Shown only when the corpus could not support an answer. It is
+   deliberately styled as a *different kind of thing*: amber rule,
+   warning label, no citations and no support score. Nothing about
+   it should read as equivalent to a grounded answer. */
+.unsourced {
+  margin: 0 0 16px;
+  padding: 13px 15px;
+  border-left: 3px solid var(--abstain);
+  background: rgba(245,196,81,.06);
+  border-radius: 0 10px 10px 0;
+}
+.unsourced .tag-un {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--abstain); margin-bottom: 8px;
+}
+.unsourced p {
+  margin: 0; font-family: var(--deva); font-size: 15.5px;
+  line-height: 1.6; color: #d8dbe0;
+}
+.unsourced .caveat {
+  margin-top: 8px; font-family: var(--mono); font-size: 10px;
+  color: var(--fg-faint); letter-spacing: .02em;
+}

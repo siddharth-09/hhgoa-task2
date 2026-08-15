@@ -33,6 +33,7 @@ Nothing raises. `AnswerResult.decision` says what happened and why.
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -71,6 +72,19 @@ MAX_QUERY_CHARS = 512
 MIN_SUPPORT = GUARD_MIN_SUPPORT
 BORDERLINE_SUPPORT = 0.30
 
+# When retrieval finds nothing, optionally also show what the model knows on its
+# own -- clearly separated, never merged into the grounded answer.
+#
+# This is deliberately NOT offered for refusals or greetings. A blocked
+# credential request must not be answered from model knowledge either; the only
+# case that qualifies is "the corpus cannot support this", which is a gap in the
+# data rather than a reason to withhold.
+#
+# The unsourced text lives in its own field, carries no citations and is never
+# scored for grounding, so `answer`, `answer_source` and every benchmark stay
+# exactly as they were. Set ALLOW_UNSOURCED=false to switch it off.
+ALLOW_UNSOURCED = os.getenv("ALLOW_UNSOURCED", "true").lower() in ("1", "true", "yes")
+
 
 @dataclass(slots=True)
 class Source:
@@ -93,6 +107,10 @@ class AnswerResult:
     generated_answer: str = ""
     answer_source: str = ""  # "extractive" | "generated" | "refusal" | "abstain"
     route: str = ""  # which index served this query -- "indic" or "english"
+    # Model-knowledge answer shown only when the corpus could not support one.
+    # Separate from `answer` on purpose: it is not grounded and must never be
+    # presented as though it were.
+    unsourced_answer: str = ""
 
     support: float = 0.0
     grounding: float = 0.0
@@ -174,6 +192,17 @@ class RAGHarness:
         qv = self.embedder.encode_query("warmup")
         res = self.retriever.search(qv, "warmup", k=self.top_k)
         extract_answer("warmup", qv, res.hits, self.embedder)
+
+    def _attach_unsourced(self, r: AnswerResult, question: str) -> None:
+        """Best-effort model-knowledge answer for a query the corpus cannot serve."""
+        if not ALLOW_UNSOURCED or r.answer_source != "abstain":
+            return
+        try:
+            g = self.llm.generate_unsourced(question)
+        except Exception:  # noqa: BLE001 -- decoration, never a failure path
+            return
+        if g.ok and g.sufficient and g.answer:
+            r.unsourced_answer = g.answer
 
     def answer(self, question: str, *, generate: bool = True) -> AnswerResult:
         t_start = time.perf_counter()
@@ -267,8 +296,10 @@ class RAGHarness:
             r.decision = out.decision.value
             r.reason = out.reason
             r.answer_source = "abstain"
+            if generate:
+                self._attach_unsourced(r, question)
             r.timings_ms = t
-            r.total_ms = r.fast_path_ms
+            r.total_ms = round((time.perf_counter() - t_start) * 1000, 3)
             return r
 
         if borderline:
@@ -294,6 +325,7 @@ class RAGHarness:
                     r.reason = "rescued_by_llm_from_borderline_support"
                 else:
                     r.reason = f"borderline_and_generation_rejected:{gver.reason}"
+            self._attach_unsourced(r, question)
             r.timings_ms = t
             r.total_ms = round((time.perf_counter() - t_start) * 1000, 3)
             return r
@@ -350,6 +382,7 @@ class RAGHarness:
             r.answer_source = "abstain"
             r.decision = Decision.ABSTAIN_UNGROUNDED.value
             r.reason = "llm_reported_insufficient"
+            self._attach_unsourced(r, question)
         elif not gen.ok:
             r.reason = f"llm_failed:{gen.error[:120]}"
 

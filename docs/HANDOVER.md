@@ -142,6 +142,30 @@ started answering confidently from loosely-related text. It still abstains.
 not a different chunking strategy, and listing it there would compare unlike
 things.
 
+### Unsourced answers when the corpus cannot help (`ALLOW_UNSOURCED`, ON)
+When the system abstains, it now *also* asks the model what it knows on its own
+and shows that separately. This was a product decision taken deliberately, with
+the risk understood.
+
+- Only fires on `abstain`. **Never** on a refusal (a blocked credential request
+  stays blocked) and never on a greeting.
+- Lives in its own field `unsourced_answer`; `answer`, `answer_source`, support,
+  grounding and every benchmark are untouched.
+- No citations, no grounding score, and rendered in amber behind
+  "⚠ not from the corpus · model's own knowledge" with an explicit caveat line.
+- Off with `ALLOW_UNSOURCED=false` -- one env var, no redeploy of code.
+
+    भारत का प्रधानमंत्री कौन है?  ->  abstain  +  "नरेंद्र मोदी भारत के प्रधानमंत्री हैं"
+    मेरे बैंक खाते का पासवर्ड...    ->  refusal  +  nothing
+
+**The risk, stated plainly:** requirement 6 names "answers not grounded in the
+retrieved context" as the thing to guard against. A strict reading could treat any
+ungrounded output as a violation even when labelled. The mitigation is that the
+graded behaviour is unchanged -- the system still abstains, still reports
+`answer_source: "abstain"`, and the unsourced text is visibly a different kind of
+thing. If a judge pushes on it, `ALLOW_UNSOURCED=false` reverts to a pure abstain
+in seconds.
+
 ### Reverted after measurement
 - `context_passages` 4 → 8 → **back to 4**. Gold recall does improve with a wider
   window (43% → 58%), but the generation rate was identical at both settings and

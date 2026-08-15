@@ -206,6 +206,19 @@ function renderAnswer(d, tier) {
   if (d.llm_error) v.push(`<span class="v bad">LLM ${esc(d.llm_error.slice(0, 48))}</span>`);
   $('#verdicts').innerHTML = v.join('');
 
+  // Model-knowledge answer, only ever alongside an abstain and never merged
+  // into the answer above it.
+  const un = $('#unsourced');
+  if (un) {
+    un.innerHTML = d.unsourced_answer
+      ? `<div class="unsourced">
+           <div class="tag-un">⚠ not from the corpus · model's own knowledge</div>
+           <p lang="hi">${esc(d.unsourced_answer)}</p>
+           <div class="caveat">unverified — no source, no citation, not covered by the grounding check</div>
+         </div>`
+      : '';
+  }
+
   const before = $('#beforeAfter');
   if (before) {
     before.innerHTML = rewritten

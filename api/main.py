@@ -39,8 +39,8 @@ from pydantic import BaseModel, Field
 
 from core.embedder import Embedder, EmbedderConfig
 from core.extractive import extract_answer
-from core.index import ChunkIndex
 from core.harness import RAGHarness
+from core.index import ChunkIndex
 from core.retriever import (
     DEFAULT_ENSEMBLE,
     ENGLISH_INDEX,
@@ -167,6 +167,7 @@ def _answer_payload(r) -> dict:
         ],
         "retrieval_provenance": r.retrieval_provenance,
         "route": r.route,
+        "unsourced_answer": r.unsourced_answer,
         "timings_ms": r.timings_ms,
         "fast_path_ms": r.fast_path_ms,
         "total_ms": r.total_ms,
