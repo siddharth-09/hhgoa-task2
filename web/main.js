@@ -9,6 +9,16 @@ const $  = (s) => document.querySelector(s);
 const esc = (s) => (s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 const ms = (v) => `${(+v).toFixed(1)}ms`;
 
+/* Analytics. A thin wrapper so the page never depends on it: if gtag is blocked
+   by an extension or fails to load, track() is a no-op and nothing downstream
+   notices. No question text is ever sent -- only the shape of the interaction,
+   which is what tells us how the demo was actually used. */
+const track = (name, params) => {
+  try {
+    if (typeof window.gtag === 'function') window.gtag('event', name, params || {});
+  } catch { /* analytics must never break the app */ }
+};
+
 const api = async (path, opts) => {
   const r = await fetch(path, opts);
   if (!r.ok) throw new Error((await r.text()).slice(0, 240) || `HTTP ${r.status}`);
@@ -245,10 +255,11 @@ function renderAnswer(d, tier) {
 /* ───────────────────────── ask ───────────────────────── */
 let busy = false;
 
-async function ask(question) {
+async function ask(question, method = 'text') {
   question = (question || '').trim();
   if (!question || busy) return;
   busy = true;
+  track('ask_question', { method, script: /[\u0900-\u097F]/.test(question) ? 'devanagari' : 'latin' });
   pulse(0.9);
   $('#hint').classList.remove('err');
   $('#hint').textContent = 'retrieving…';
@@ -264,6 +275,11 @@ async function ask(question) {
     // or a greeting ends the exchange here.
     const willGenerate = !['refusal', 'greeting'].includes(fast.answer_source);
     renderAnswer(fast, willGenerate ? 'pending' : 'idle');
+    track('answer_outcome', {
+      source: fast.answer_source, route: fast.route || 'indic',
+      within_budget: fast.fast_path_ms < 200,
+      fast_path_ms: Math.round(fast.fast_path_ms),
+    });
     $('#hint').textContent = `answered in ${ms(fast.fast_path_ms)} — no LLM involved`;
     pulse(0.5);
 
@@ -280,6 +296,11 @@ async function ask(question) {
           body: JSON.stringify({ question, generate: true }),
         });
         renderAnswer(full, full.answer_source === 'generated' ? 'generated' : 'idle');
+        track('generation_outcome', {
+          source: full.answer_source,
+          rewritten: !!full.generated_answer && full.generated_answer !== full.extractive_answer,
+          unsourced_shown: !!full.unsourced_answer,
+        });
         $('#hint').textContent =
           full.answer_source === 'generated'
             ? `polished in ${ms(full.total_ms)} · fast answer stood at ${ms(full.fast_path_ms)}`
@@ -306,7 +327,7 @@ $('#closeAns').onclick = () => {
   document.body.classList.remove('answered');
 };
 document.querySelectorAll('.sample').forEach((b) => {
-  b.onclick = () => { $('#q').value = b.dataset.q; ask(b.dataset.q); };
+  b.onclick = () => { $('#q').value = b.dataset.q; ask(b.dataset.q, 'sample'); };
 });
 
 /* ───────────────────────── microphone ─────────────────────────
@@ -391,6 +412,7 @@ $('#micBtn').onclick = async () => {
           return;
         }
         $('#q').value = d.transcript;
+        track('voice_used', { stt_ms: Math.round(d.stt_ms || 0), source: d.answer_source });
         renderAnswer(d, d.answer_source === 'generated' ? 'generated' : 'idle');
         $('#hint').textContent =
           `heard “${d.transcript}” · STT ${ms(d.stt_ms)} (outside budget) · answer ${ms(d.fast_path_ms)}`;
@@ -441,6 +463,7 @@ $('#benchBtn').onclick = async () => {
 
   try {
     const d = await api('/benchmark?n=100');
+    track('benchmark_run', { p50: d.fast_path_ms.p50, within_budget: d.within_budget });
     const p = d.fast_path_ms;
     countTo($('#mP50'), p.p50, 1);
     countTo($('#mP70'), p.p70, 1);
@@ -472,6 +495,7 @@ $('#cmpBtn').onclick = async () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question }),
     });
+    track('compare_run', { distinct_top_hits: d.distinct_top_hits });
     btn.textContent = `re-run · ${esc(d.agreement)}`;
     $('#compare').innerHTML = `
       <table class="grid-table">

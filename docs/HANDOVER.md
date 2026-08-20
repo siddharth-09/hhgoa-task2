@@ -9,7 +9,7 @@ State of the submission, what changed, and what is left. Deadline **2026-08-22
 
 **Live:** https://pucho.me — HTTPS (Let's Encrypt, valid to 12 Nov 2026)
 **Repo:** https://github.com/siddharth-09/hhgoa-task2 — public
-**Serving box:** AWS `m7i-flex.large` (`i-0902157eaa2aa8ddc`, ap-south-1b, `13.234.76.135`)
+**Serving box:** AWS `m7i-flex.large` (`i-0902157eaa2aa8ddc`, ap-south-1b, `13.202.200.164` (Elastic IP))
 
 All six technical requirements are met and verifiable live.
 
@@ -35,7 +35,7 @@ AWS EC2 m7i-flex.large   2 vCPU Xeon 8488C (avx512_vnni), 7.7GB RAM, 20GB disk
   containers             hhgoa-api (port 127.0.0.1:8000), caddy (80/443)
   restart policy         unless-stopped -- survives reboot
   cost                   ~$0.09/hr from the $120 credit; MUST stay up through judging
-  ssh                    ssh -i ~/.ssh/hhgoa-task2.pem ec2-user@13.234.76.135
+  ssh                    ssh -i ~/.ssh/hhgoa-task2.pem ec2-user@13.202.200.164
 
 Oracle box (80.225.231.132, shared)   benchmarking only, nothing served from it
 ```
@@ -241,3 +241,105 @@ stop pushing** — review and push when ready:
 git log origin/main..HEAD --oneline    # what is waiting
 git push origin main
 ```
+
+
+---
+
+# Session 2 — 2026-08-20
+
+## Changed since the last handover
+
+**Elastic IP allocated.** The public address moved from `13.234.76.135` to
+**`13.202.200.164`** and is now *static*. Before this it was an Amazon-assigned
+dynamic IP, so any stop of the instance silently changed it and broke DNS. The
+Namecheap A record has been updated. No further DNS changes should ever be needed.
+
+> If the site looks down, check `dig +short pucho.me` first. A stale resolver
+> holding the old IP looks exactly like an outage. Brave keeps its own DNS cache
+> separate from macOS -- clear it at `brave://net-internals/#dns`.
+
+**Google Analytics added** (`G-1VE4ZKC6MK`). Deployed and verified firing --
+`page_view` plus custom events: `ask_question` (method + script), `answer_outcome`
+(source, route, within_budget, fast_path_ms), `generation_outcome`, `voice_used`,
+`benchmark_run`, `compare_run`. No question text is ever sent, and `track()`
+no-ops if gtag is blocked, so analytics can never break the page.
+
+> Brave blocks GA by default, so your own visits will not appear. Only Realtime
+> populates immediately; standard reports lag 24-48h on a new property.
+
+## Scaling: what is and is not possible
+
+The organisers said scoring runs an **eval loop, ~10 loops**. Whether it is
+sequential or parallel changes everything and is still **unanswered -- ask them.**
+
+Measured on the live box (2 vCPU):
+
+    concurrency 1   median  55ms    0/2  over budget
+    concurrency 2   median 121ms    0/4
+    concurrency 4   median 162ms    2/8
+    concurrency 8   median 337ms   14/16
+
+Nothing errors at any level -- it degrades, it does not fall over.
+
+| Option | Available | Helps a parallel eval |
+|---|---|---|
+| Resize to 4 vCPU | **BLOCKED** -- `FreeTierRestrictionError` | — |
+| `ORT_THREADS=1` | tested | No: single-request 55 -> 63ms, only ~8% better under load |
+| 2nd instance + DNS round-robin | yes | **No** -- RR splits resolvers, not requests; one eval client lands entirely on one box |
+| 2nd instance + Caddy load balancing | yes | ~1.6x |
+| 2nd instance + **ALB** | **yes, probed and confirmed not blocked** | ~2x, with health checks |
+
+ALB costs ~$0.02/hr plus ~$0.09/hr for the second box, about **$18/week**. The
+index would be copied **box-to-box inside AWS** (2-5 min, free same-AZ), never
+re-uploaded from the Mac. An ALB terminates TLS, so Caddy's automatic certificate
+would be replaced by an ACM cert -- roughly 30 extra minutes and a change to a
+part of the stack that currently works.
+
+**Recommendation: build none of it until the organisers confirm the eval is
+parallel.** At 55ms sequential this is an hour of work and a second thing that can
+fail, for zero gain.
+
+## AWS account state
+
+    EC2      i-0902157eaa2aa8ddc  m7i-flex.large, running, Elastic IP attached
+    EIP      13.202.200.164       KEEP -- release only when the instance is retired
+    Budgets  2 (free)             $50 budget with 80%/100% email alerts
+    S3       hhgoa-task2-index-…  8 bytes, pre-existing
+    Lambda   none                 created for the credit, deleted after it posted
+    RDS      none                 the last $20 activity, still not started
+
+Free-tier credits: **$60 of $100** earned. Spend to date under $1. The remaining
+$20 needs an RDS instance -- billable (~$15/mo if the account is not free-tier
+eligible), so create it, wait for the credit to post, then delete.
+
+Repeatedly confirmed blocked by the Free Plan: Bedrock *inference* (models list
+fine), `c7g` instance types, instance resizing, public Lambda Function URLs.
+
+## Demo video
+
+A two-person script was written this session (in the chat log). Verified short
+questions to use:
+
+    ताजमहल कहाँ है?              answers AND visibly rewrites -- the best demo moment
+    भारत का प्रधानमंत्री कौन है?   abstains + shows the labelled unsourced answer
+
+Avoid `भारत की राजधानी क्या है?` and `मैनहट्टन परियोजना क्या थी?` on camera: both
+answer correctly but the LLM returns the span *unchanged*, so nothing visibly
+happens. `लिफ्ट का मतलब क्या है?` abstains.
+
+The 90-second process video must show **process, not product** -- scrolling
+`docs/BUILD_LOG.md` while talking through one thing that went wrong is the
+easiest honest version.
+
+## Still blocking submission
+
+1. Two videos
+2. Social posts -- **every member**, Instagram + X + LinkedIn, `#RAGInGoa`, >=1 public Instagram
+3. Submission form
+4. Keep the EC2 instance running through judging
+
+## Note to whoever works on this next
+
+Do not restart the live `hhgoa-api` container to run experiments -- that is the
+submitted link and it goes down while you do. Test against a scratch container on
+a spare port, or against `localhost:8000` on the box.
